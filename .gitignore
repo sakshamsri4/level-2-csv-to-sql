@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Secrets
+.env
+
+# Build artifacts — regenerate with `make ingest`
+data/warehouse/*
+!data/warehouse/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
