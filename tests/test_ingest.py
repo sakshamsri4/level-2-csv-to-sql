@@ -18,6 +18,10 @@ ROWS = (
     "SHP-4,NPT,SEA,ATL,2024-08-01,2024-08-07,2024-07-20,30.0,400.00,delivered\n"
     # unmappable location
     "SHP-5,ORN,Atlantis,ATL,2024-08-01,2024-08-07,2024-08-08,40.0,500.00,delivered\n"
+    # id collision: same shipment_id as SHP-1, but genuinely different data (not a duplicate)
+    "SHP-1,BLZ,LAX,JFK,2024-07-01,2024-07-06,2024-07-09,10.0,999.00,DELIVERED\n"
+    # status with no mapping in cleaning_rules.yaml
+    "SHP-6,COY,LAX,JFK,2024-08-10,2024-08-15,2024-08-16,15.0,150.00,lost\n"
 )
 
 
@@ -85,8 +89,48 @@ def test_every_raw_row_is_accounted_for(tmp_path):
     report, _ = _load(tmp_path)
     assert (
         report["rows_read"]
-        == report["rows_loaded"] + report["rows_rejected"] + report["duplicates_removed"]
+        == report["rows_loaded"]
+        + report["rows_rejected"]
+        + report["duplicates_removed"]
+        + report["conflicting_rows_dropped"]
     )
+
+
+def test_a_shipment_id_collision_is_reported_as_conflicting_not_silently_dropped(tmp_path):
+    report, con = _load(tmp_path)
+    # SHP-1 appears three times: two byte-identical rows (a real duplicate) and one row
+    # with the same id but a different cost (a data-entry collision, not a duplicate).
+    count = con.execute("SELECT count(*) FROM shipments WHERE shipment_id='SHP-1'").fetchone()[0]
+    assert count == 1
+    assert report["duplicates_removed"] == 1
+    assert report["conflicting_rows_dropped"] == 1
+    assert "SHP-1" in report["conflicting_shipment_ids"]
+
+
+def test_an_unmapped_status_is_nulled_and_the_change_is_counted(tmp_path):
+    report, con = _load(tmp_path)
+    status = con.execute("SELECT status FROM shipments WHERE shipment_id='SHP-6'").fetchone()[0]
+    assert status is None
+    assert report["statuses_unmapped"] == 1
+
+
+def test_the_raw_location_spelling_survives_into_rejects(tmp_path):
+    _, con = _load(tmp_path)
+    raw_origin = con.execute(
+        "SELECT raw_origin FROM rejects WHERE shipment_id = 'SHP-5'"
+    ).fetchone()[0]
+    assert raw_origin == "Atlantis"
+
+
+def test_the_locations_table_is_not_left_behind_in_the_warehouse(tmp_path):
+    _, con = _load(tmp_path)
+    tables = {
+        r[0]
+        for r in con.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+        ).fetchall()
+    }
+    assert tables == {"shipments", "carriers", "rejects"}
 
 
 def test_an_impossible_weight_is_nulled_and_the_change_is_counted(tmp_path):

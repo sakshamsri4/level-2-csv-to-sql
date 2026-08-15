@@ -47,10 +47,14 @@ def ingest() -> None:
     typer.echo(f"read       {report['rows_read']}")
     typer.echo(f"loaded     {report['rows_loaded']}")
     typer.echo(f"duplicates {report['duplicates_removed']}")
+    typer.echo(f"id collisions (kept 1, different data) {report['conflicting_rows_dropped']}")
+    if report["conflicting_shipment_ids"]:
+        typer.echo(f"    ids: {report['conflicting_shipment_ids']}")
     typer.echo(f"rejected   {report['rows_rejected']}")
     for reason, count in report["reject_reasons"].items():
         typer.echo(f"    {reason}: {count}")
     typer.echo(f"weights nulled (negative)   {report['weights_nulled']}")
+    typer.echo(f"statuses unmapped           {report['statuses_unmapped']}")
     typer.echo(f"shipments with no carrier   {report['shipments_without_carrier']}")
     typer.echo(f"carriers                    {report['carriers_loaded']}")
     typer.echo(f"\n-> {config.assay_warehouse}")

@@ -128,6 +128,8 @@ def ingest(raw_dir: Path, warehouse: Path, rules: Rules) -> dict[str, Any]:
             {scrub("s.carrier_code", rules)}                      AS carrier_code,
             o.code                                                AS origin,
             d.code                                                AS destination,
+            s.origin                                              AS raw_origin,
+            s.destination                                         AS raw_destination,
             {to_date("s.shipped_date", rules)}                    AS shipped_date,
             {to_date("s.promised_date", rules)}                   AS promised_date,
             {to_date("s.delivered_date", rules)}                  AS delivered_date,
@@ -139,6 +141,10 @@ def ingest(raw_dir: Path, warehouse: Path, rules: Rules) -> dict[str, Any]:
             CASE WHEN lower(trim(s.status)) IN ({delivered})  THEN 'delivered'
                  WHEN lower(trim(s.status)) IN ({in_transit}) THEN 'in_transit' END AS status,
             try_cast({scrub("s.weight_kg", rules)} AS DOUBLE) < 0 AS weight_was_negative,
+            CASE WHEN {scrub("s.status", rules)} IS NOT NULL
+                      AND lower(trim(s.status)) NOT IN ({delivered})
+                      AND lower(trim(s.status)) NOT IN ({in_transit})
+                 THEN true ELSE false END AS status_was_unmapped,
             CASE
                 WHEN {scrub("s.shipment_id", rules)} IS NULL     THEN 'missing shipment_id'
                 WHEN {to_date("s.shipped_date", rules)} IS NULL  THEN 'unparseable shipped_date'
@@ -155,7 +161,8 @@ def ingest(raw_dir: Path, warehouse: Path, rules: Rules) -> dict[str, Any]:
 
     con.execute("""
         CREATE OR REPLACE TABLE rejects AS
-        SELECT shipment_id, origin, destination, shipped_date, reject_reason
+        SELECT shipment_id, origin, destination, raw_origin, raw_destination,
+               shipped_date, reject_reason
         FROM typed WHERE reject_reason IS NOT NULL
     """)
     con.execute("""
@@ -180,10 +187,31 @@ def ingest(raw_dir: Path, warehouse: Path, rules: Rules) -> dict[str, Any]:
         """
         SELECT (SELECT count(*) FROM shipments),
                (SELECT count(*) FROM rejects),
-               (SELECT count(*) FROM typed WHERE reject_reason IS NULL),
                (SELECT count(*) FROM typed WHERE weight_was_negative),
+               (SELECT count(*) FROM typed WHERE status_was_unmapped),
                (SELECT count(*) FROM carriers),
                (SELECT count(*) FROM shipments WHERE carrier_code IS NULL)
+        """,
+    )
+    # Two ways a shipment_id can collapse to one row: a byte-identical duplicate
+    # (safe to drop silently, so long as it is counted) and a genuine collision — the
+    # same id with different data, which is a data-entry error, not a duplicate, and
+    # must be reported rather than merged away indistinguishably from a real duplicate.
+    dupes = _fetchone(
+        con,
+        """
+        WITH ok AS (
+            SELECT shipment_id, carrier_code, origin, destination, shipped_date,
+                   promised_date, delivered_date, delay_days, weight_kg, cost_usd, status
+            FROM typed WHERE reject_reason IS NULL
+        ),
+        distinct_ok AS (SELECT DISTINCT * FROM ok)
+        SELECT
+            (SELECT count(*) FROM ok) - (SELECT count(*) FROM distinct_ok),
+            (SELECT count(*) FROM distinct_ok) - (SELECT count(DISTINCT shipment_id) FROM ok),
+            (SELECT list(shipment_id) FROM (
+                SELECT shipment_id FROM distinct_ok GROUP BY shipment_id HAVING count(*) > 1
+            ))
         """,
     )
     reasons = {
@@ -194,14 +222,18 @@ def ingest(raw_dir: Path, warehouse: Path, rules: Rules) -> dict[str, Any]:
     }
     con.execute("DROP TABLE staging")
     con.execute("DROP TABLE typed")
+    con.execute("DROP TABLE locations")
     con.close()
 
     return {
         "rows_read": rows_read,
         "rows_loaded": int(counts[0]),
         "rows_rejected": int(counts[1]),
-        "duplicates_removed": int(counts[2]) - int(counts[0]),
-        "weights_nulled": int(counts[3]),
+        "duplicates_removed": int(dupes[0]),
+        "conflicting_rows_dropped": int(dupes[1]),
+        "conflicting_shipment_ids": sorted(str(sid) for sid in (dupes[2] or [])),
+        "weights_nulled": int(counts[2]),
+        "statuses_unmapped": int(counts[3]),
         "carriers_loaded": int(counts[4]),
         "shipments_without_carrier": int(counts[5]),
         "reject_reasons": reasons,
