@@ -81,7 +81,11 @@ def _select_canonical(path: Path, rules: Rules, con: duckdb.DuckDBPyConnection) 
         source = next(
             (present[c.lower()] for c in rules["columns"][field] if c.lower() in present), None
         )
-        projections.append(f'"{source}" AS {field}' if source else f"NULL AS {field}")
+        if source:
+            escaped = source.replace('"', '""')
+            projections.append(f'"{escaped}" AS {field}')
+        else:
+            projections.append(f"NULL AS {field}")
     return (
         f"SELECT {', '.join(projections)}, {_quote(path.name)} AS source_file "
         f"FROM read_csv({_quote(str(path))}, all_varchar=true)"
@@ -90,6 +94,118 @@ def _select_canonical(path: Path, rules: Rules, con: duckdb.DuckDBPyConnection) 
 
 def shipment_files(raw_dir: Path) -> list[Path]:
     return sorted(p for p in raw_dir.glob("*.csv") if p.name != "carriers.csv")
+
+
+def ingest(raw_dir: Path, warehouse: Path, rules: Rules) -> dict[str, Any]:
+    """Clean every raw extract into `shipments`, `carriers` and `rejects`.
+
+    Nothing is silently discarded. A row that cannot be cleaned lands in
+    `rejects` with the reason, and every count in the returned report adds up
+    to the number of rows read.
+    """
+    warehouse.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(warehouse))
+
+    pairs = ", ".join(f"({_quote(a)}, {_quote(c)})" for a, c in _alias_pairs(rules))
+    con.execute(
+        f"CREATE OR REPLACE TABLE locations AS SELECT * FROM (VALUES {pairs}) t(alias, code)"
+    )
+
+    union = " UNION ALL ".join(
+        _select_canonical(path, rules, con) for path in shipment_files(raw_dir)
+    )
+    con.execute(f"CREATE OR REPLACE TABLE staging AS {union}")
+    rows_read = int(_fetchone(con, "SELECT count(*) FROM staging")[0])
+
+    delivered = ", ".join(_quote(s) for s in rules["statuses"]["delivered"])
+    in_transit = ", ".join(_quote(s) for s in rules["statuses"]["in_transit"])
+
+    # One pass: scrub, parse, canonicalise, derive, and label anything unusable.
+    con.execute(f"""
+        CREATE OR REPLACE TABLE typed AS
+        SELECT
+            {scrub("s.shipment_id", rules)}                       AS shipment_id,
+            {scrub("s.carrier_code", rules)}                      AS carrier_code,
+            o.code                                                AS origin,
+            d.code                                                AS destination,
+            {to_date("s.shipped_date", rules)}                    AS shipped_date,
+            {to_date("s.promised_date", rules)}                   AS promised_date,
+            {to_date("s.delivered_date", rules)}                  AS delivered_date,
+            date_diff('day', {to_date("s.promised_date", rules)},
+                             {to_date("s.delivered_date", rules)}) AS delay_days,
+            CASE WHEN try_cast({scrub("s.weight_kg", rules)} AS DOUBLE) >= 0
+                 THEN try_cast({scrub("s.weight_kg", rules)} AS DOUBLE) END AS weight_kg,
+            try_cast({scrub("s.cost_usd", rules)} AS DECIMAL(12,2))         AS cost_usd,
+            CASE WHEN lower(trim(s.status)) IN ({delivered})  THEN 'delivered'
+                 WHEN lower(trim(s.status)) IN ({in_transit}) THEN 'in_transit' END AS status,
+            try_cast({scrub("s.weight_kg", rules)} AS DOUBLE) < 0 AS weight_was_negative,
+            CASE
+                WHEN {scrub("s.shipment_id", rules)} IS NULL     THEN 'missing shipment_id'
+                WHEN {to_date("s.shipped_date", rules)} IS NULL  THEN 'unparseable shipped_date'
+                WHEN {to_date("s.promised_date", rules)} IS NULL THEN 'unparseable promised_date'
+                WHEN o.code IS NULL                             THEN 'unmapped origin'
+                WHEN d.code IS NULL                             THEN 'unmapped destination'
+                WHEN {to_date("s.delivered_date", rules)}
+                     < {to_date("s.shipped_date", rules)}        THEN 'delivered before shipped'
+            END AS reject_reason
+        FROM staging s
+        LEFT JOIN locations o ON lower(trim(s.origin)) = o.alias
+        LEFT JOIN locations d ON lower(trim(s.destination)) = d.alias
+    """)
+
+    con.execute("""
+        CREATE OR REPLACE TABLE rejects AS
+        SELECT shipment_id, origin, destination, shipped_date, reject_reason
+        FROM typed WHERE reject_reason IS NOT NULL
+    """)
+    con.execute("""
+        CREATE OR REPLACE TABLE shipments AS
+        SELECT shipment_id, carrier_code, origin, destination, shipped_date, promised_date,
+               delivered_date, delay_days, weight_kg, cost_usd, status
+        FROM typed
+        WHERE reject_reason IS NULL
+        QUALIFY row_number() OVER (PARTITION BY shipment_id ORDER BY shipped_date) = 1
+    """)
+
+    carriers_csv = raw_dir / "carriers.csv"
+    con.execute(f"""
+        CREATE OR REPLACE TABLE carriers AS
+        SELECT trim(carrier_code) AS carrier_code, trim(name) AS carrier_name,
+               lower(trim(tier))  AS service_tier
+        FROM read_csv({_quote(str(carriers_csv))}, all_varchar=true)
+    """)
+
+    counts = _fetchone(
+        con,
+        """
+        SELECT (SELECT count(*) FROM shipments),
+               (SELECT count(*) FROM rejects),
+               (SELECT count(*) FROM typed WHERE reject_reason IS NULL),
+               (SELECT count(*) FROM typed WHERE weight_was_negative),
+               (SELECT count(*) FROM carriers),
+               (SELECT count(*) FROM shipments WHERE carrier_code IS NULL)
+        """,
+    )
+    reasons = {
+        str(r[0]): int(r[1])
+        for r in con.execute(
+            "SELECT reject_reason, count(*) FROM rejects GROUP BY 1 ORDER BY 2 DESC"
+        ).fetchall()
+    }
+    con.execute("DROP TABLE staging")
+    con.execute("DROP TABLE typed")
+    con.close()
+
+    return {
+        "rows_read": rows_read,
+        "rows_loaded": int(counts[0]),
+        "rows_rejected": int(counts[1]),
+        "duplicates_removed": int(counts[2]) - int(counts[0]),
+        "weights_nulled": int(counts[3]),
+        "carriers_loaded": int(counts[4]),
+        "shipments_without_carrier": int(counts[5]),
+        "reject_reasons": reasons,
+    }
 
 
 def profile(raw_dir: Path, rules: Rules) -> list[dict[str, Any]]:

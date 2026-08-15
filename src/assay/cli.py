@@ -8,6 +8,7 @@ from pathlib import Path
 import typer
 
 from assay.config import settings
+from assay.ingest.pipeline import ingest as pipeline_ingest
 from assay.ingest.pipeline import load_rules, profile
 
 RULES_PATH = Path("config/cleaning_rules.yaml")
@@ -36,3 +37,20 @@ def profile_raw() -> None:
         typer.echo(f"  missing values: {missing or 'none'}")
         if report["unmapped_locations"]:
             typer.echo(f"  UNKNOWN LOCATIONS: {report['unmapped_locations']}")
+
+
+@app.command()
+def ingest() -> None:
+    """Clean data/raw/*.csv and load them into DuckDB."""
+    config = settings()
+    report = pipeline_ingest(config.assay_raw_dir, config.assay_warehouse, load_rules(RULES_PATH))
+    typer.echo(f"read       {report['rows_read']}")
+    typer.echo(f"loaded     {report['rows_loaded']}")
+    typer.echo(f"duplicates {report['duplicates_removed']}")
+    typer.echo(f"rejected   {report['rows_rejected']}")
+    for reason, count in report["reject_reasons"].items():
+        typer.echo(f"    {reason}: {count}")
+    typer.echo(f"weights nulled (negative)   {report['weights_nulled']}")
+    typer.echo(f"shipments with no carrier   {report['shipments_without_carrier']}")
+    typer.echo(f"carriers                    {report['carriers_loaded']}")
+    typer.echo(f"\n-> {config.assay_warehouse}")
