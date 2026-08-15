@@ -19,9 +19,11 @@ class FakeLLM:
 
     sql: str
     prose: str = "A canned summary."
+    answerable: bool = True
+    rationale: str = "canned by FakeLLM"
 
     def generate_sql(self, question: str, schema: Schema) -> GeneratedSQL:
-        return GeneratedSQL(sql=self.sql, rationale="canned by FakeLLM")
+        return GeneratedSQL(sql=self.sql, rationale=self.rationale, answerable=self.answerable)
 
     def summarise(self, question: str, sql: str, columns: list[str], rows: list[list[Any]]) -> str:
         return self.prose

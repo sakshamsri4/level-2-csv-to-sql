@@ -20,6 +20,18 @@ def ask(question: str, llm: LLM, warehouse: Warehouse, max_rows: int) -> Answer:
     schema = warehouse.schema()
     generated = llm.generate_sql(question, schema)
 
+    if not generated.answerable:
+        answer = Answer(
+            question=question,
+            sql=generated.sql,
+            prose=f"{generated.rationale} I did not run a substitute query, "
+            "since a number answering a different question is worse than no answer.",
+            refused=True,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+        )
+        _log(answer, "unanswerable")
+        return answer
+
     verdict = check_sql(generated.sql, schema)
     if not verdict.ok:
         answer = Answer(

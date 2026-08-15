@@ -13,10 +13,18 @@ Schema = dict[str, set[str]]
 
 
 class GeneratedSQL(BaseModel):
-    """What the model returns. Structured, never scraped out of a code fence."""
+    """What the model returns. Structured, never scraped out of a code fence.
+
+    `answerable` exists because structured output otherwise forces the model to
+    return *some* SQL no matter what: asked for a column the schema lacks, its only
+    legal move is to substitute a different one and hope the rationale is read — and
+    a precise, confident number answering a different question than the one asked is
+    worse than a refusal. This field gives it a way to say "I can't" instead.
+    """
 
     sql: str
     rationale: str
+    answerable: bool = True
 
 
 class Verdict(BaseModel):
