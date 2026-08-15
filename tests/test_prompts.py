@@ -23,3 +23,16 @@ def test_the_fake_returns_whatever_sql_the_test_asked_for():
     fake = FakeLLM(sql="SELECT 1")
     assert fake.generate_sql("anything", SCHEMA).sql == "SELECT 1"
     assert fake.summarise("q", "SELECT 1", ["a"], [[1]])
+
+
+def test_the_sql_prompt_forbids_reading_the_wall_clock():
+    # The warehouse is historical (2024 data); the environment's real clock can be
+    # months or years past the data's range. A model that resolves "last quarter"
+    # against CURRENT_DATE instead of the data's own max(shipped_date) silently
+    # filters every row out — the exact "empty result read as no delays" failure
+    # this project's guardrails exist to prevent, just arriving through a valid
+    # query instead of a hallucinated identifier. This test cannot catch a model
+    # that ignores the instruction, but it does catch someone deleting the rule.
+    text = (PROMPT_DIR / "sql_generation.v1.md").read_text()
+    assert "CURRENT_DATE" in text
+    assert "max(shipped_date)" in text.lower()
