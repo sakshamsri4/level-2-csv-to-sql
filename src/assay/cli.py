@@ -112,13 +112,17 @@ def eval_cmd(
 
     if live:
         typer.echo("\n--- live: what the real model actually emits ---")
-        llm = OpenAILLM(config.assay_generation_model, config.openai_api_key)
-        schema = warehouse.schema()
-        for case in yaml.safe_load(Path("evals/cases.yaml").read_text()):
-            generated = llm.generate_sql(str(case["question"]), schema)
-            verdict = check_sql(generated.sql, schema)
-            state = "allowed" if verdict.ok else f"refused ({verdict.kind})"
-            typer.echo(f"  {case['id']:32} {state:26} {generated.sql[:70]}")
+        try:
+            llm = OpenAILLM(config.assay_generation_model, config.openai_api_key)
+            schema = warehouse.schema()
+            for case in yaml.safe_load(Path("evals/cases.yaml").read_text()):
+                generated = llm.generate_sql(str(case["question"]), schema)
+                verdict = check_sql(generated.sql, schema)
+                state = "allowed" if verdict.ok else f"refused ({verdict.kind})"
+                typer.echo(f"  {case['id']:32} {state:26} {generated.sql[:70]}")
+        except (WarehouseError, LLMError) as err:
+            typer.echo(f"\n{err}\n")
+            raise typer.Exit(code=1) from err
 
     if failed:
         raise typer.Exit(code=1)

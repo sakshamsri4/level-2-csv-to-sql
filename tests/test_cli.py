@@ -132,6 +132,25 @@ def test_a_failing_eval_case_prints_got_and_reason_not_just_fail(tmp_path, monke
     assert "the query was wrongly allowed to run" in out
 
 
+def test_a_live_eval_llm_failure_prints_the_plain_message_not_a_traceback(
+    tmp_path, monkeypatch, capsys
+):
+    # --live is the only path that calls the model outside a try/except. It
+    # needs a real key to reach, which is exactly why no run has ever hit it.
+    fake_settings = Settings(openai_api_key="test-key", assay_warehouse=_warehouse_db(tmp_path))
+    monkeypatch.setattr(cli, "settings", lambda: fake_settings)
+    monkeypatch.setattr(cli, "OpenAILLM", lambda model, api_key: _RaisingLLM("rate limit exceeded"))
+    monkeypatch.setattr(cli, "run_evals", lambda cases_path, warehouse: [])
+
+    with pytest.raises(typer.Exit) as excinfo:
+        cli.eval_cmd(live=True)
+
+    assert excinfo.value.exit_code == 1
+    out = capsys.readouterr().out
+    assert "rate limit exceeded" in out
+    assert "Traceback" not in out
+
+
 def test_a_passing_eval_case_does_not_print_got_or_reason(tmp_path, monkeypatch, capsys):
     # PASS lines are already legible; a wall of reasons on every line would
     # bury the failures that actually need attention.
