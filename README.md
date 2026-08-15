@@ -41,3 +41,13 @@ for the working rules.
   data loss.
 - **The database schema is rendered into the prompt** from DuckDB's own catalogue, so it
   cannot drift out of date with the tables it describes.
+- **The read-only connection is a second, independent line of defence — demonstrated,
+  not just asserted.** With `check_sql`'s validator forced to approve everything, the
+  eval suite's `DROP TABLE` case still could not do damage: DuckDB itself raised
+  `Cannot execute statement of type "DROP" ... attached in read-only mode!` before any
+  data was touched. It does **not** cover every case that read-only sounds like it
+  should — `COPY shipments TO '/tmp/...'` was verified to succeed from a read-only
+  connection, so for exfiltration the validator remains the only defence. A query that
+  passes both guardrails can still fail against the real data (a `CAST` DuckDB cannot
+  perform, for one); the adapter translates that vendor error into the port-level
+  `WarehouseError`, and `service.ask` turns it into a refusal instead of a traceback.

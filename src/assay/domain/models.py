@@ -8,9 +8,11 @@ from pydantic import BaseModel, Field
 
 VerdictKind = Literal["ok", "unsafe", "unknown_identifier"]
 
-# Every value _log() can ever emit: the guardrail's own VerdictKind, plus the one
-# refusal cause that never touches check_sql at all.
-LogVerdict = Literal["ok", "unsafe", "unknown_identifier", "unanswerable"]
+# Every value _log() can ever emit: the guardrail's own VerdictKind, plus the two
+# refusal causes that never touch check_sql at all — one decided before it ever
+# runs (unanswerable), one only discoverable after both guardrails already said
+# yes and the database itself refused (execution_error).
+LogVerdict = Literal["ok", "unsafe", "unknown_identifier", "unanswerable", "execution_error"]
 
 # table name -> its column names. Both guardrails take exactly this and nothing more.
 Schema = dict[str, set[str]]

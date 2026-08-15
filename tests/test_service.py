@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from assay.adapters.fakes import FakeLLM
+from assay.ports import WarehouseError
 from assay.service import ask
 
 SCHEMA = {
@@ -134,13 +135,53 @@ def test_an_answerable_question_with_a_legitimately_empty_result_is_not_unanswer
     assert len(warehouse.executed) == 1
 
 
+def test_a_query_the_database_cannot_run_is_refused_not_raised():
+    # Both guardrails can only judge what a query *says* — they cannot know
+    # whether the data underneath will cooperate. A warehouse that raises
+    # WarehouseError stands in for a CAST that meets a value it cannot
+    # convert: valid SQL, real identifiers, and the database says no anyway.
+    class BrokenWarehouse:
+        def schema(self) -> dict[str, set[str]]:
+            return SCHEMA
+
+        def run(self, sql: str, max_rows: int) -> tuple[list[str], list[list[Any]]]:
+            raise WarehouseError("Could not convert string 'DFW' to INT32")
+
+    answer = ask(
+        "what is the average origin code?",
+        FakeLLM(sql="SELECT CAST(origin AS INTEGER) FROM shipments"),
+        BrokenWarehouse(),
+        max_rows=200,
+    )
+    assert answer.refused
+    assert answer.rows == []
+    assert "DFW" in answer.prose
+
+
+def test_a_database_execution_error_is_logged_with_its_own_verdict(caplog):
+    caplog.set_level(logging.INFO, logger="assay")
+
+    class BrokenWarehouse:
+        def schema(self) -> dict[str, set[str]]:
+            return SCHEMA
+
+        def run(self, sql: str, max_rows: int) -> tuple[list[str], list[list[Any]]]:
+            raise WarehouseError("boom")
+
+    ask("q", FakeLLM(sql="SELECT origin FROM shipments"), BrokenWarehouse(), max_rows=200)
+
+    lines = [json.loads(record.message) for record in caplog.records]
+    assert len(lines) == 1
+    assert lines[0]["verdict"] == "execution_error"
+    assert lines[0]["refused"] is True
+
+
 def test_the_log_line_is_valid_json_carrying_what_observability_needs(caplog):
     """The JSON log line is the only observability artifact this project ships, so
     its shape is worth pinning directly rather than trusting _log()'s implementation
-    by eye. One refusal and one success are enough: between the two branches of
-    ask() that call _log(), every value LogVerdict can hold — "ok", "unsafe",
-    "unknown_identifier", "unanswerable" — is reachable, and this test checks that
-    the two calls it actually makes land on two distinct, correct ones."""
+    by eye. One refusal and one success are enough here to pin the line's shape;
+    the other values LogVerdict can hold — "unknown_identifier", "unanswerable",
+    "execution_error" — are each exercised by their own dedicated test above."""
     caplog.set_level(logging.INFO, logger="assay")
     warehouse = FakeWarehouse()
 

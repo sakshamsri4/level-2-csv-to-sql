@@ -8,7 +8,7 @@ import time
 
 from assay.domain.models import Answer, LogVerdict
 from assay.domain.sql_guard import check_sql
-from assay.ports import LLM, Warehouse
+from assay.ports import LLM, Warehouse, WarehouseError
 
 log = logging.getLogger("assay")
 
@@ -44,7 +44,24 @@ def ask(question: str, llm: LLM, warehouse: Warehouse, max_rows: int) -> Answer:
         _log(answer, verdict.kind)
         return answer
 
-    columns, rows = warehouse.run(generated.sql, max_rows)
+    try:
+        columns, rows = warehouse.run(generated.sql, max_rows)
+    except WarehouseError as err:
+        # Both guardrails said yes — the SQL is safe and every identifier is
+        # real — but the data underneath did not cooperate (a CAST that met a
+        # value it cannot convert, for one). That is not a hallucination and
+        # not an attack, so it gets its own verdict rather than being folded
+        # into either guardrail's.
+        answer = Answer(
+            question=question,
+            sql=generated.sql,
+            prose=f"That query was valid, but the database could not run it: {err}",
+            refused=True,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+        )
+        _log(answer, "execution_error")
+        return answer
+
     answer = Answer(
         question=question,
         sql=generated.sql,
