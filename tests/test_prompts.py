@@ -1,5 +1,8 @@
+from openai.lib._pydantic import to_strict_json_schema
+
 from assay.adapters.fakes import FakeLLM
 from assay.adapters.openai_llm import PROMPT_DIR, render_schema
+from assay.domain.models import GeneratedSQL
 
 SCHEMA = {"shipments": {"origin", "delay_days"}, "carriers": {"carrier_code"}}
 
@@ -36,3 +39,11 @@ def test_the_sql_prompt_forbids_reading_the_wall_clock():
     text = (PROMPT_DIR / "sql_generation.v1.md").read_text()
     assert "CURRENT_DATE" in text
     assert "max(shipped_date)" in text.lower()
+
+
+def test_the_model_is_always_forced_to_state_whether_it_can_answer():
+    """`answerable` defaults to True in Python, which would fail open if the model
+    ever omitted it. It cannot: the strict schema marks it required. This test is
+    what makes that safe rather than assumed — if an SDK change ever made the field
+    optional, the default would silently reopen the substitute-a-column failure."""
+    assert "answerable" in to_strict_json_schema(GeneratedSQL)["required"]

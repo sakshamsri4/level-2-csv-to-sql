@@ -6,7 +6,7 @@ import json
 import logging
 import time
 
-from assay.domain.models import Answer
+from assay.domain.models import Answer, LogVerdict
 from assay.domain.sql_guard import check_sql
 from assay.ports import LLM, Warehouse
 
@@ -57,7 +57,7 @@ def ask(question: str, llm: LLM, warehouse: Warehouse, max_rows: int) -> Answer:
     return answer
 
 
-def _log(answer: Answer, verdict: str) -> None:
+def _log(answer: Answer, verdict: LogVerdict) -> None:
     log.info(
         json.dumps(
             {

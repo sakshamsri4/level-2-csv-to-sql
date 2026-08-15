@@ -1,3 +1,5 @@
+import json
+import logging
 from typing import Any
 
 import pytest
@@ -72,11 +74,14 @@ def test_a_refusal_returns_no_rows_that_could_be_read_as_an_answer():
 
 
 def test_an_unanswerable_question_is_refused_and_never_reaches_the_warehouse():
+    # This SQL is fully valid on its own — real table, real columns, single SELECT —
+    # so check_sql would approve it if asked. The `answerable` flag has to be the
+    # thing doing the refusing here, not a coincidental identifier rejection.
     warehouse = FakeWarehouse()
     answer = ask(
         "what is the average customer satisfaction score by carrier?",
         FakeLLM(
-            sql="SELECT carrier_code, avg(delay_days) FROM shipments GROUP BY 1",
+            sql="SELECT origin, avg(delay_days) FROM shipments GROUP BY 1",
             answerable=False,
             rationale="the schema has no customer satisfaction score column",
         ),
@@ -127,3 +132,39 @@ def test_an_answerable_question_with_a_legitimately_empty_result_is_not_unanswer
     assert not answer.refused
     assert answer.rows == []
     assert len(warehouse.executed) == 1
+
+
+def test_the_log_line_is_valid_json_carrying_what_observability_needs(caplog):
+    """The JSON log line is the only observability artifact this project ships, so
+    its shape is worth pinning directly rather than trusting _log()'s implementation
+    by eye. One refusal and one success are enough: between the two branches of
+    ask() that call _log(), every value LogVerdict can hold — "ok", "unsafe",
+    "unknown_identifier", "unanswerable" — is reachable, and this test checks that
+    the two calls it actually makes land on two distinct, correct ones."""
+    caplog.set_level(logging.INFO, logger="assay")
+    warehouse = FakeWarehouse()
+
+    refusal = ask("bad", FakeLLM(sql="DROP TABLE shipments"), warehouse, max_rows=200)
+    success = ask(
+        "good",
+        FakeLLM(sql="SELECT origin FROM shipments", prose="ok"),
+        warehouse,
+        max_rows=200,
+    )
+
+    lines = [json.loads(record.message) for record in caplog.records]
+    assert len(lines) == 2
+    refusal_line, success_line = lines
+
+    for line, answer in ((refusal_line, refusal), (success_line, success)):
+        assert line["event"] == "ask"
+        assert line["question"] == answer.question
+        assert line["sql"] == answer.sql
+        assert line["rows"] == len(answer.rows)
+        assert line["elapsed_ms"] == answer.elapsed_ms
+        assert isinstance(line["elapsed_ms"], int)
+
+    assert refusal_line["verdict"] == "unsafe"
+    assert refusal_line["refused"] is True
+    assert success_line["verdict"] == "ok"
+    assert success_line["refused"] is False
