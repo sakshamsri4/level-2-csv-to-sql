@@ -10,6 +10,7 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.qualify import qualify
+from sqlglot.optimizer.scope import build_scope
 
 from assay.domain.models import Schema, Verdict
 
@@ -56,7 +57,22 @@ def _check_identifiers(root: exp.Expression, schema: Schema) -> Verdict:
     resolver, which understands scope, aliases, CTEs and derived tables far
     better than a hand-rolled walk does.
     """
-    ctes = {cte.alias_or_name.lower() for cte in root.find_all(exp.CTE)}
+    # Which CTE names are visible AT each table reference, not tree-wide. A
+    # flat set let a CTE buried in a nested subquery exempt the same bare name
+    # in an outer scope, where DuckDB resolves it to a real catalogue object
+    # (`sqlite_master` and friends). sqlglot's scope walker already knows this;
+    # the previous hand-rolled version of this function is why it is trusted.
+    #
+    # Fails closed by construction: a table the walker never reports gets an
+    # empty visible-set, so it is checked against the schema with no exemption.
+    visible: dict[int, set[str]] = {}
+    scope_root = build_scope(root)
+    if scope_root is not None:
+        for scope in scope_root.traverse():
+            names = {name.lower() for name in scope.cte_sources}
+            for scoped in scope.tables:
+                visible[id(scoped)] = names
+
     for table in root.find_all(exp.Table):
         name = table.name.lower()
         # Qualifiers are judged BEFORE the CTE exemption, and this ordering is
@@ -69,13 +85,17 @@ def _check_identifiers(root: exp.Expression, schema: Schema) -> Verdict:
         # sqlglot splits a reference across `.catalog` and `.db` by arity, so
         # both positions are checked — testing only the first non-empty one let
         # a real leading catalog hide a foreign schema behind it.
-        foreign = {q.lower() for q in (table.catalog, table.db) if q} - {"main"}
+        qualifiers = {q.lower() for q in (table.catalog, table.db) if q}
+        foreign = qualifiers - {"main"}
         if foreign:
             return _unknown(
                 f"table {name!r} is qualified with {sorted(foreign)}; "
                 f"only unqualified tables are allowed: {sorted(schema)}"
             )
-        if name in ctes:
+        # Unqualified only: a CTE cannot be referenced with a qualifier, so
+        # `main.deliveries` is a real-table reference even when a CTE shares
+        # the bare name.
+        if not qualifiers and name in visible.get(id(table), set()):
             continue  # a name the query defines for itself, not a real table
         if not name:
             return _unknown(

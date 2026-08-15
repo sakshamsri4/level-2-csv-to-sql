@@ -363,6 +363,49 @@ def test_a_foreign_schema_in_the_middle_position_is_refused_not_just_the_leading
     assert v.kind == "unknown_identifier"
 
 
+def test_a_cte_declared_in_an_inner_scope_does_not_exempt_the_same_name_outside_it():
+    # The CTE set was collected tree-wide, so a CTE buried in a nested subquery
+    # exempted that bare name everywhere — including an outer reference DuckDB
+    # resolves to a real catalogue object. Executed, this returned the CREATE
+    # statements for every table in the warehouse.
+    v = check_sql(
+        "SELECT * FROM (SELECT 1 AS z FROM "
+        "(WITH sqlite_master AS (SELECT 1 AS a) SELECT a FROM sqlite_master)) t, sqlite_master",
+        SCHEMA,
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_qualified_name_never_receives_the_cte_exemption():
+    # A CTE cannot be referenced with a qualifier, so `main.deliveries` is a
+    # real-table reference regardless of a CTE sharing the bare name.
+    v = check_sql(
+        "WITH deliveries AS (SELECT 1 AS origin) SELECT * FROM main.deliveries",
+        SCHEMA,
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_cte_is_still_visible_inside_a_nested_subquery():
+    # The control on the fix above: CTE scope propagates inward, and narrowing
+    # the exemption must not break that.
+    v = check_sql(
+        "WITH a AS (SELECT origin FROM shipments) SELECT origin FROM (SELECT origin FROM a) x",
+        SCHEMA,
+    )
+    assert v.ok, v.reason
+
+
+def test_a_recursive_cte_referring_to_itself_is_still_allowed():
+    v = check_sql(
+        "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM t WHERE n < 5) SELECT n FROM t",
+        SCHEMA,
+    )
+    assert v.ok, v.reason
+
+
 def test_an_aggregate_over_a_real_column_in_having_is_allowed():
     v = check_sql(
         "SELECT origin, destination, avg(delay_days) AS d FROM shipments "
