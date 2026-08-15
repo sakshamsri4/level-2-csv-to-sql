@@ -6,6 +6,8 @@ from typing import Any, Protocol
 
 from assay.domain.models import GeneratedSQL, Schema
 
+__all__ = ["LLM", "GeneratedSQL", "Schema", "Warehouse"]
+
 
 class LLM(Protocol):
     def generate_sql(self, question: str, schema: Schema) -> GeneratedSQL: ...
