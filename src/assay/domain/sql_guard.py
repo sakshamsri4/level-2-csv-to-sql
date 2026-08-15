@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import sqlglot
 from sqlglot import exp
-from sqlglot.optimizer.scope import Scope, build_scope
+from sqlglot.errors import SqlglotError
+from sqlglot.optimizer.qualify import qualify
 
 from assay.domain.models import Schema, Verdict
 
@@ -44,110 +45,43 @@ def _unknown(reason: str) -> Verdict:
     return Verdict(ok=False, kind="unknown_identifier", reason=reason)
 
 
-def _sources(scope: Scope) -> dict[str, exp.Table | Scope]:
-    """What this query block can actually see. `selected_sources` rather than
-    `sources` because the latter includes CTEs the block never selects from,
-    which would let their aliases legitimise columns elsewhere."""
-    return {name.lower(): node_source[1] for name, node_source in scope.selected_sources.items()}
-
-
-def _exposed(scope: Scope) -> set[str] | None:
-    """The column names a CTE or subquery exposes to whoever selects from it.
-
-    None when a star inside it makes them un-enumerable — the only case where we
-    still have to take the source's word for it.
-    """
-    block = scope.expression
-    if not isinstance(block, exp.Query):
-        return None
-    names: set[str] = set()
-    for projection in block.selects:
-        if isinstance(projection, exp.Star) or (
-            isinstance(projection, exp.Column) and isinstance(projection.this, exp.Star)
-        ):
-            return None
-        name = projection.alias_or_name
-        if not name:
-            return None
-        names.add(name.lower())
-    return names
+def _render_schema(schema: Schema) -> str:
+    return ", ".join(f"{table}({', '.join(sorted(schema[table]))})" for table in sorted(schema))
 
 
 def _check_identifiers(root: exp.Expression, schema: Schema) -> Verdict:
     """Every table and column the query names must exist in the real catalogue.
 
-    Checked per query block, not across the whole tree: an alias defined in one
-    scope must not silently vouch for a hallucinated column in another.
+    We validate the tables ourselves and hand the columns to sqlglot's own
+    resolver, which understands scope, aliases, CTEs and derived tables far
+    better than a hand-rolled walk does.
     """
-    root_scope = build_scope(root)
-    if root_scope is None:
-        # Unreachable given check_sql only ever passes a Select or Union here,
-        # both of which sqlglot's scope builder always resolves — but the
-        # return type is Scope | None, so this keeps mypy honest.
-        return Verdict(ok=True)
+    ctes = {cte.alias_or_name.lower() for cte in root.find_all(exp.CTE)}
+    for table in root.find_all(exp.Table):
+        name = table.name.lower()
+        if name in ctes:
+            continue  # a name the query defines for itself, not a real table
+        if not name:
+            return _unknown(
+                "table functions such as read_csv() are not allowed; "
+                f"query only these tables: {sorted(schema)}"
+            )
+        if name not in schema:
+            return _unknown(f"there is no table named {name!r}; the tables are {sorted(schema)}")
 
-    for scope in root_scope.traverse():
-        tables: dict[str, set[str]] = {}
-        opaque: set[str] = set()
-        for name, source in _sources(scope).items():
-            if not isinstance(source, exp.Table):
-                exposed = _exposed(source)
-                if exposed is None:
-                    opaque.add(name)  # a star inside it; its columns are its own business
-                else:
-                    tables[name] = exposed
-                continue
-            real = source.name.lower()
-            if not real:
-                return _unknown(
-                    "table functions such as read_csv() are not allowed; "
-                    f"query only these tables: {sorted(schema)}"
-                )
-            if real not in schema:
-                return _unknown(
-                    f"there is no table named {real!r}; the tables are {sorted(schema)}"
-                )
-            tables[name] = schema[real]
-
-        # `count(*) AS n` makes `n` referenceable — but only inside this block.
-        # `scope.expression` is a Query (Select or Union) for every scope build_scope
-        # produces; the isinstance narrows the wider `exp.Expr` type for mypy.
-        block = scope.expression
-        selects = block.selects if isinstance(block, exp.Query) else []
-        local = {s.alias.lower() for s in selects if isinstance(s, exp.Alias) and s.alias}
-        anywhere: set[str] = set().union(*tables.values()) if tables else set()
-
-        for column in scope.columns:
-            if isinstance(column.this, exp.Star):
-                continue  # `s.*` names no single column
-            qualifier, name = column.table.lower(), column.name.lower()
-            if not qualifier:
-                if name in anywhere or name in local:
-                    continue
-                if opaque:
-                    continue  # an un-enumerable source may legitimately expose it
-                return _unknown(f"there is no column named {name!r}; available: {sorted(anywhere)}")
-            elif qualifier in opaque:
-                continue
-            elif qualifier in tables:
-                allowed = tables[qualifier]
-            else:
-                # A correlated reference reaching into an enclosing block.
-                outer, found = scope.parent, None
-                while outer is not None and found is None:
-                    found = _sources(outer).get(qualifier)
-                    outer = outer.parent
-                if found is None:
-                    return _unknown(f"{qualifier!r} is not a table or alias in this query")
-                if isinstance(found, exp.Table):
-                    allowed = schema.get(found.name.lower(), set())
-                else:
-                    exposed = _exposed(found)
-                    if exposed is None:
-                        continue
-                    allowed = exposed
-            if name not in allowed and name not in local:
-                return _unknown(f"there is no column named {name!r}; available: {sorted(allowed)}")
+    try:
+        # qualify() rewrites the tree, so give it a copy — the SQL we execute
+        # must stay byte-for-byte what was validated.
+        qualify(
+            root.copy(),
+            dialect=DIALECT,
+            schema={table: dict.fromkeys(columns, "VARCHAR") for table, columns in schema.items()},
+            validate_qualify_columns=True,
+        )
+    except SqlglotError as err:
+        # sqlglot names the offending column but not the real ones, and naming
+        # the real ones is the entire point of this guardrail.
+        return _unknown(f"{err}; the columns are {_render_schema(schema)}")
 
     return Verdict(ok=True)
 

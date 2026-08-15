@@ -241,10 +241,37 @@ def test_a_column_a_subquery_does_not_expose_is_refused():
     assert v.kind == "unknown_identifier"
 
 
-def test_a_column_from_a_star_cte_is_allowed_because_its_columns_cannot_be_enumerated():
-    # Deliberate limit of the guard, not an oversight: SELECT * inside a CTE makes
-    # its output columns un-enumerable, so we defer to the database rather than guess.
+def test_a_column_from_a_star_cte_is_resolved_against_the_real_schema_and_refused_if_bogus():
+    # A star CTE's output columns are no longer a blind spot: qualify() expands the
+    # star against the real schema, so a hallucinated column behind it is still caught.
     v = check_sql(
         "WITH late AS (SELECT * FROM shipments) SELECT whatever_it_exposes FROM late", SCHEMA
     )
-    assert v.ok, v.reason
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_hallucinated_column_is_refused_when_a_subquery_projects_an_unaliased_concatenation():
+    v = check_sql("SELECT x.bogus FROM (SELECT origin || '' FROM shipments) x", SCHEMA)
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_hallucinated_column_is_refused_when_a_cte_projects_an_unaliased_case_expression():
+    v = check_sql(
+        "WITH x AS (SELECT case when origin='a' then 1 else 0 end FROM shipments) "
+        "SELECT bogus_column FROM shipments, x",
+        SCHEMA,
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_hallucinated_column_is_refused_when_a_subquery_projects_an_unaliased_function_call():
+    v = check_sql(
+        "SELECT bogus_column FROM shipments "
+        "JOIN (SELECT upper(origin) FROM shipments) AS x ON true",
+        SCHEMA,
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
