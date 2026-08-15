@@ -13,7 +13,9 @@ def test_settings_read_paths_from_environment(monkeypatch):
 
 
 def test_settings_have_working_defaults_without_any_environment():
-    s = Settings()
+    # _env_file=None so this tests the class's own defaults, not whatever the
+    # developer's real .env happens to contain on this machine.
+    s = Settings(_env_file=None)
     assert s.assay_raw_dir == Path("data/raw")
     assert s.assay_generation_model
 

@@ -302,6 +302,26 @@ def test_a_select_list_alias_may_be_referenced_from_having():
     assert v.ok, v.reason
 
 
+def test_a_table_qualified_with_a_foreign_catalog_is_refused_even_though_the_table_name_is_real():
+    # ATTACH is refused by the safety check, so this is not exploitable today —
+    # but the identifier guard previously matched only the bare table name,
+    # so `other_db.shipments` slipped past it unchallenged. It must not.
+    v = check_sql("SELECT origin FROM other_db.shipments", SCHEMA)
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_table_qualified_with_the_real_main_catalog_is_still_allowed():
+    v = check_sql("SELECT origin FROM main.shipments", SCHEMA)
+    assert v.ok, v.reason
+
+
+def test_a_three_part_qualified_table_naming_a_foreign_catalog_is_refused():
+    v = check_sql("SELECT origin FROM other_db.main.shipments", SCHEMA)
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
 def test_an_aggregate_over_a_real_column_in_having_is_allowed():
     v = check_sql(
         "SELECT origin, destination, avg(delay_days) AS d FROM shipments "

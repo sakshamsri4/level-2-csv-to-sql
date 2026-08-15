@@ -16,7 +16,7 @@ from assay.domain.sql_guard import check_sql
 from assay.evals import run_evals
 from assay.ingest.pipeline import ingest as pipeline_ingest
 from assay.ingest.pipeline import load_rules, profile
-from assay.ports import WarehouseError
+from assay.ports import LLMError, WarehouseError
 from assay.service import ask as service_ask
 
 RULES_PATH = Path("config/cleaning_rules.yaml")
@@ -80,7 +80,7 @@ def ask(question: str) -> None:
             DuckDBWarehouse(config.assay_warehouse),
             config.assay_max_rows,
         )
-    except (FileNotFoundError, WarehouseError) as err:
+    except (FileNotFoundError, WarehouseError, LLMError) as err:
         typer.echo(f"\n{err}\n")
         raise typer.Exit(code=1) from err
     typer.echo(f"\n{answer.prose}\n")
@@ -99,11 +99,14 @@ def eval_cmd(
     warehouse = DuckDBWarehouse(config.assay_warehouse)
     try:
         results = run_evals(Path("evals/cases.yaml"), warehouse)
-    except (FileNotFoundError, WarehouseError) as err:
+    except (FileNotFoundError, WarehouseError, LLMError) as err:
         typer.echo(f"\n{err}\n")
         raise typer.Exit(code=1) from err
     for r in results:
         typer.echo(f"  {'PASS' if r.passed else 'FAIL'}  {r.id:32} {r.expect:20} {r.guards[:60]}")
+        if not r.passed:
+            typer.echo(f"        got: {r.got}")
+            typer.echo(f"        reason: {r.reason}")
     failed = [r for r in results if not r.passed]
     typer.echo(f"\n{len(results) - len(failed)}/{len(results)} passed")
 
@@ -116,10 +119,6 @@ def eval_cmd(
             verdict = check_sql(generated.sql, schema)
             state = "allowed" if verdict.ok else f"refused ({verdict.kind})"
             typer.echo(f"  {case['id']:32} {state:26} {generated.sql[:70]}")
-            if not verdict.ok:
-                continue
-            # The only live failure that matters: something dangerous got through.
-            assert check_sql(generated.sql, schema).ok
 
     if failed:
         raise typer.Exit(code=1)

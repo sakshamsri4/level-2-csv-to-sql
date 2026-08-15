@@ -11,7 +11,7 @@ import streamlit as st
 from assay.adapters.duckdb_warehouse import DuckDBWarehouse
 from assay.adapters.openai_llm import OpenAILLM
 from assay.config import settings
-from assay.ports import WarehouseError
+from assay.ports import LLMError, WarehouseError
 from assay.service import ask
 
 st.set_page_config(page_title="Assay", page_icon="🚚")
@@ -38,13 +38,17 @@ question = st.text_input(
 )
 
 if question:
-    with st.spinner("Generating SQL, checking it, running it…"):
-        answer = ask(
-            question,
-            OpenAILLM(config.assay_generation_model, config.openai_api_key),
-            warehouse,
-            config.assay_max_rows,
-        )
+    try:
+        with st.spinner("Generating SQL, checking it, running it…"):
+            answer = ask(
+                question,
+                OpenAILLM(config.assay_generation_model, config.openai_api_key),
+                warehouse,
+                config.assay_max_rows,
+            )
+    except LLMError as err:
+        st.error(str(err))
+        st.stop()
 
     if answer.refused:
         st.error(answer.prose)

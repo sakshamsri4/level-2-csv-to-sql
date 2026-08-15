@@ -66,6 +66,16 @@ def _check_identifiers(root: exp.Expression, schema: Schema) -> Verdict:
                 "table functions such as read_csv() are not allowed; "
                 f"query only these tables: {sorted(schema)}"
             )
+        # sqlglot puts a two-part reference's qualifier in `.db` and a
+        # three-part reference's leading qualifier in `.catalog`. Either one
+        # naming something other than "main" reaches outside this warehouse —
+        # ATTACH is refused, so nothing else should be reachable this way.
+        qualifier = (table.catalog or table.db or "").lower()
+        if qualifier and qualifier != "main":
+            return _unknown(
+                f"table {name!r} is qualified with {qualifier!r}; "
+                f"only unqualified tables are allowed: {sorted(schema)}"
+            )
         if name not in schema:
             return _unknown(f"there is no table named {name!r}; the tables are {sorted(schema)}")
 
