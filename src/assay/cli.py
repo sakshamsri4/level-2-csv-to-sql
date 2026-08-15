@@ -7,10 +7,13 @@ import logging
 from pathlib import Path
 
 import typer
+import yaml
 
 from assay.adapters.duckdb_warehouse import DuckDBWarehouse
 from assay.adapters.openai_llm import OpenAILLM
 from assay.config import settings
+from assay.domain.sql_guard import check_sql
+from assay.evals import run_evals
 from assay.ingest.pipeline import ingest as pipeline_ingest
 from assay.ingest.pipeline import load_rules, profile
 from assay.service import ask as service_ask
@@ -79,4 +82,35 @@ def ask(question: str) -> None:
     if answer.sql:
         typer.echo(f"  SQL: {answer.sql}")
     if answer.refused:
+        raise typer.Exit(code=1)
+
+
+@app.command("eval")
+def eval_cmd(
+    live: bool = typer.Option(False, "--live", help="Send the questions to the real model"),
+) -> None:
+    """Run the eval suite. Offline by default: no key, no spend."""
+    config = settings()
+    warehouse = DuckDBWarehouse(config.assay_warehouse)
+    results = run_evals(Path("evals/cases.yaml"), warehouse)
+    for r in results:
+        typer.echo(f"  {'PASS' if r.passed else 'FAIL'}  {r.id:32} {r.expect:20} {r.guards[:60]}")
+    failed = [r for r in results if not r.passed]
+    typer.echo(f"\n{len(results) - len(failed)}/{len(results)} passed")
+
+    if live:
+        typer.echo("\n--- live: what the real model actually emits ---")
+        llm = OpenAILLM(config.assay_generation_model, config.openai_api_key)
+        schema = warehouse.schema()
+        for case in yaml.safe_load(Path("evals/cases.yaml").read_text()):
+            generated = llm.generate_sql(str(case["question"]), schema)
+            verdict = check_sql(generated.sql, schema)
+            state = "allowed" if verdict.ok else f"refused ({verdict.kind})"
+            typer.echo(f"  {case['id']:32} {state:26} {generated.sql[:70]}")
+            if not verdict.ok:
+                continue
+            # The only live failure that matters: something dangerous got through.
+            assert check_sql(generated.sql, schema).ok
+
+    if failed:
         raise typer.Exit(code=1)
