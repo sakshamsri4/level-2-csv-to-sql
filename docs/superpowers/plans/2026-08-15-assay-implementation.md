@@ -280,17 +280,24 @@ from assay.domain.sql_guard import check_sql
 
 SCHEMA = {
     "shipments": {
-        "shipment_id", "carrier_code", "origin", "destination", "shipped_date",
-        "promised_date", "delivered_date", "delay_days", "weight_kg", "cost_usd", "status",
+        "shipment_id",
+        "carrier_code",
+        "origin",
+        "destination",
+        "shipped_date",
+        "promised_date",
+        "delivered_date",
+        "delay_days",
+        "weight_kg",
+        "cost_usd",
+        "status",
     },
     "carriers": {"carrier_code", "carrier_name", "service_tier"},
 }
 
 
 def test_an_ordinary_aggregate_question_is_allowed():
-    v = check_sql(
-        "SELECT origin, destination, avg(delay_days) FROM shipments GROUP BY 1,2", SCHEMA
-    )
+    v = check_sql("SELECT origin, destination, avg(delay_days) FROM shipments GROUP BY 1,2", SCHEMA)
     assert v.ok, v.reason
 
 
@@ -390,9 +397,20 @@ DIALECT = "duckdb"
 # purpose — the overlap is free and the omission would not be.
 ALLOWED_ROOTS = (exp.Select, exp.Union)
 FORBIDDEN = (
-    exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create, exp.Alter,
-    exp.Attach, exp.Detach, exp.Copy, exp.Command, exp.Pragma, exp.Set,
-    exp.Install, exp.Use,
+    exp.Insert,
+    exp.Update,
+    exp.Delete,
+    exp.Drop,
+    exp.Create,
+    exp.Alter,
+    exp.Attach,
+    exp.Detach,
+    exp.Copy,
+    exp.Command,
+    exp.Pragma,
+    exp.Set,
+    exp.Install,
+    exp.Use,
 )
 
 
@@ -522,9 +540,7 @@ def test_a_cte_name_is_not_mistaken_for_a_hallucinated_table():
 
 
 def test_an_alias_on_a_cte_is_not_mistaken_for_a_hallucinated_table():
-    v = check_sql(
-        "WITH late AS (SELECT origin FROM shipments) SELECT l.origin FROM late l", SCHEMA
-    )
+    v = check_sql("WITH late AS (SELECT origin FROM shipments) SELECT l.origin FROM late l", SCHEMA)
     assert v.ok, v.reason
 
 
@@ -534,9 +550,7 @@ def test_a_subquery_alias_is_not_mistaken_for_a_hallucinated_table():
 
 
 def test_a_column_alias_defined_in_the_query_may_be_referenced():
-    v = check_sql(
-        "WITH t AS (SELECT count(*) AS n FROM shipments) SELECT n FROM t", SCHEMA
-    )
+    v = check_sql("WITH t AS (SELECT count(*) AS n FROM shipments) SELECT n FROM t", SCHEMA)
     assert v.ok, v.reason
 
 
@@ -935,8 +949,16 @@ import yaml
 Rules = dict[str, Any]
 
 CANONICAL = [
-    "shipment_id", "carrier_code", "origin", "destination", "shipped_date",
-    "promised_date", "delivered_date", "weight_kg", "cost_usd", "status",
+    "shipment_id",
+    "carrier_code",
+    "origin",
+    "destination",
+    "shipped_date",
+    "promised_date",
+    "delivered_date",
+    "weight_kg",
+    "cost_usd",
+    "status",
 ]
 DATE_FIELDS = ["shipped_date", "promised_date", "delivered_date"]
 LOCATION_FIELDS = ["origin", "destination"]
@@ -1006,7 +1028,9 @@ def profile(raw_dir: Path, rules: Rules) -> list[dict[str, Any]]:
 
         nulls = {
             field: int(
-                con.execute(f"SELECT count(*) FROM raw WHERE {scrub(field, rules)} IS NULL").fetchone()[0]  # noqa: E501
+                con.execute(
+                    f"SELECT count(*) FROM raw WHERE {scrub(field, rules)} IS NULL"
+                ).fetchone()[0]  # noqa: E501
             )
             for field in CANONICAL
         }
@@ -1027,7 +1051,9 @@ def profile(raw_dir: Path, rules: Rules) -> list[dict[str, Any]]:
             str(row[0])
             for row in con.execute(
                 "SELECT DISTINCT v FROM ("
-                + " UNION ALL ".join(f"SELECT {scrub(f, rules)} AS v FROM raw" for f in LOCATION_FIELDS)  # noqa: E501
+                + " UNION ALL ".join(
+                    f"SELECT {scrub(f, rules)} AS v FROM raw" for f in LOCATION_FIELDS
+                )  # noqa: E501
                 + ") WHERE v IS NOT NULL AND lower(trim(v)) NOT IN "
                 + f"({', '.join(_quote(a) for a in sorted(aliases))})"
             ).fetchall()
@@ -1160,7 +1186,7 @@ ROWS = (
     # four date formats, four spellings of two cities
     "SHP-1,BLZ,LAX,JFK,2024-07-01,2024-07-06,2024-07-09,10.0,100.00,DELIVERED\n"
     "SHP-2,COY,los angeles,NYC,01/07/2024,06/07/2024,N/A,20.0,200.00,in transit\n"
-    "SHP-3,MRD,  LAX ,\"New York, NY\",Jul 01 2024,20240706,20240704,-5.0,300.00,delivered\n"
+    'SHP-3,MRD,  LAX ,"New York, NY",Jul 01 2024,20240706,20240704,-5.0,300.00,delivered\n'
     # exact duplicate of SHP-1
     "SHP-1,BLZ,LAX,JFK,2024-07-01,2024-07-06,2024-07-09,10.0,100.00,DELIVERED\n"
     # impossible: delivered before it shipped
@@ -1207,9 +1233,9 @@ def test_null_markers_become_real_nulls(tmp_path):
 
 def test_delay_days_is_derived_from_promised_and_delivered(tmp_path):
     _, con = _load(tmp_path)
-    delay = con.execute(
-        "SELECT delay_days FROM shipments WHERE shipment_id = 'SHP-1'"
-    ).fetchone()[0]
+    delay = con.execute("SELECT delay_days FROM shipments WHERE shipment_id = 'SHP-1'").fetchone()[
+        0
+    ]
     assert delay == 3
 
 
@@ -1223,8 +1249,7 @@ def test_the_duplicate_row_is_removed_and_the_removal_is_reported(tmp_path):
 def test_rows_that_cannot_be_cleaned_are_quarantined_not_dropped(tmp_path):
     report, con = _load(tmp_path)
     rejected = {
-        r[0]: r[1]
-        for r in con.execute("SELECT shipment_id, reject_reason FROM rejects").fetchall()
+        r[0]: r[1] for r in con.execute("SELECT shipment_id, reject_reason FROM rejects").fetchall()
     }
     assert "SHP-4" in rejected and "before" in rejected["SHP-4"]
     assert "SHP-5" in rejected and "origin" in rejected["SHP-5"]
@@ -1270,7 +1295,9 @@ def ingest(raw_dir: Path, warehouse: Path, rules: Rules) -> dict[str, Any]:
     con = duckdb.connect(str(warehouse))
 
     pairs = ", ".join(f"({_quote(a)}, {_quote(c)})" for a, c in _alias_pairs(rules))
-    con.execute(f"CREATE OR REPLACE TABLE locations AS SELECT * FROM (VALUES {pairs}) t(alias, code)")
+    con.execute(
+        f"CREATE OR REPLACE TABLE locations AS SELECT * FROM (VALUES {pairs}) t(alias, code)"
+    )
 
     union = " UNION ALL ".join(
         _select_canonical(path, rules, con) for path in shipment_files(raw_dir)
@@ -1285,29 +1312,29 @@ def ingest(raw_dir: Path, warehouse: Path, rules: Rules) -> dict[str, Any]:
     con.execute(f"""
         CREATE OR REPLACE TABLE typed AS
         SELECT
-            {scrub('s.shipment_id', rules)}                       AS shipment_id,
-            {scrub('s.carrier_code', rules)}                      AS carrier_code,
+            {scrub("s.shipment_id", rules)}                       AS shipment_id,
+            {scrub("s.carrier_code", rules)}                      AS carrier_code,
             o.code                                                AS origin,
             d.code                                                AS destination,
-            {to_date('s.shipped_date', rules)}                    AS shipped_date,
-            {to_date('s.promised_date', rules)}                   AS promised_date,
-            {to_date('s.delivered_date', rules)}                  AS delivered_date,
-            date_diff('day', {to_date('s.promised_date', rules)},
-                             {to_date('s.delivered_date', rules)}) AS delay_days,
-            CASE WHEN try_cast({scrub('s.weight_kg', rules)} AS DOUBLE) >= 0
-                 THEN try_cast({scrub('s.weight_kg', rules)} AS DOUBLE) END AS weight_kg,
-            try_cast({scrub('s.cost_usd', rules)} AS DECIMAL(12,2))         AS cost_usd,
+            {to_date("s.shipped_date", rules)}                    AS shipped_date,
+            {to_date("s.promised_date", rules)}                   AS promised_date,
+            {to_date("s.delivered_date", rules)}                  AS delivered_date,
+            date_diff('day', {to_date("s.promised_date", rules)},
+                             {to_date("s.delivered_date", rules)}) AS delay_days,
+            CASE WHEN try_cast({scrub("s.weight_kg", rules)} AS DOUBLE) >= 0
+                 THEN try_cast({scrub("s.weight_kg", rules)} AS DOUBLE) END AS weight_kg,
+            try_cast({scrub("s.cost_usd", rules)} AS DECIMAL(12,2))         AS cost_usd,
             CASE WHEN lower(trim(s.status)) IN ({delivered})  THEN 'delivered'
                  WHEN lower(trim(s.status)) IN ({in_transit}) THEN 'in_transit' END AS status,
-            try_cast({scrub('s.weight_kg', rules)} AS DOUBLE) < 0 AS weight_was_negative,
+            try_cast({scrub("s.weight_kg", rules)} AS DOUBLE) < 0 AS weight_was_negative,
             CASE
-                WHEN {scrub('s.shipment_id', rules)} IS NULL     THEN 'missing shipment_id'
-                WHEN {to_date('s.shipped_date', rules)} IS NULL  THEN 'unparseable shipped_date'
-                WHEN {to_date('s.promised_date', rules)} IS NULL THEN 'unparseable promised_date'
+                WHEN {scrub("s.shipment_id", rules)} IS NULL     THEN 'missing shipment_id'
+                WHEN {to_date("s.shipped_date", rules)} IS NULL  THEN 'unparseable shipped_date'
+                WHEN {to_date("s.promised_date", rules)} IS NULL THEN 'unparseable promised_date'
                 WHEN o.code IS NULL                             THEN 'unmapped origin'
                 WHEN d.code IS NULL                             THEN 'unmapped destination'
-                WHEN {to_date('s.delivered_date', rules)}
-                     < {to_date('s.shipped_date', rules)}        THEN 'delivered before shipped'
+                WHEN {to_date("s.delivered_date", rules)}
+                     < {to_date("s.shipped_date", rules)}        THEN 'delivered before shipped'
             END AS reject_reason
         FROM staging s
         LEFT JOIN locations o ON lower(trim(s.origin)) = o.alias
@@ -1569,9 +1596,7 @@ class FakeLLM:
     def generate_sql(self, question: str, schema: Schema) -> GeneratedSQL:
         return GeneratedSQL(sql=self.sql, rationale="canned by FakeLLM")
 
-    def summarise(
-        self, question: str, sql: str, columns: list[str], rows: list[list[Any]]
-    ) -> str:
+    def summarise(self, question: str, sql: str, columns: list[str], rows: list[list[Any]]) -> str:
         return self.prose
 ```
 
@@ -1599,9 +1624,7 @@ PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
 def render_schema(schema: Schema) -> str:
-    return "\n".join(
-        f"{table}({', '.join(sorted(schema[table]))})" for table in sorted(schema)
-    )
+    return "\n".join(f"{table}({', '.join(sorted(schema[table]))})" for table in sorted(schema))
 
 
 class OpenAILLM:
@@ -1612,8 +1635,8 @@ class OpenAILLM:
         self._client = OpenAI(api_key=api_key)
 
     def generate_sql(self, question: str, schema: Schema) -> GeneratedSQL:
-        system = (PROMPT_DIR / "sql_generation.v1.md").read_text().format(
-            schema=render_schema(schema)
+        system = (
+            (PROMPT_DIR / "sql_generation.v1.md").read_text().format(schema=render_schema(schema))
         )
         completion = self._client.chat.completions.parse(
             model=self._model,
@@ -1626,13 +1649,15 @@ class OpenAILLM:
             raise RuntimeError("the model returned no structured output")
         return parsed
 
-    def summarise(
-        self, question: str, sql: str, columns: list[str], rows: list[list[Any]]
-    ) -> str:
-        prompt = (PROMPT_DIR / "answer_formatting.v1.md").read_text().format(
-            question=question,
-            sql=sql,
-            result=json.dumps({"columns": columns, "rows": rows}, default=str),
+    def summarise(self, question: str, sql: str, columns: list[str], rows: list[list[Any]]) -> str:
+        prompt = (
+            (PROMPT_DIR / "answer_formatting.v1.md")
+            .read_text()
+            .format(
+                question=question,
+                sql=sql,
+                result=json.dumps({"columns": columns, "rows": rows}, default=str),
+            )
         )
         completion = self._client.chat.completions.create(
             model=self._model,
@@ -1990,8 +2015,17 @@ class StubWarehouse:
     def schema(self):
         return {
             "shipments": {
-                "shipment_id", "carrier_code", "origin", "destination", "shipped_date",
-                "promised_date", "delivered_date", "delay_days", "weight_kg", "cost_usd", "status",
+                "shipment_id",
+                "carrier_code",
+                "origin",
+                "destination",
+                "shipped_date",
+                "promised_date",
+                "delivered_date",
+                "delay_days",
+                "weight_kg",
+                "cost_usd",
+                "status",
             },
             "carriers": {"carrier_code", "carrier_name", "service_tier"},
         }
@@ -2089,7 +2123,9 @@ Expected: 3 passed
 
 ```python
 @app.command("eval")
-def eval_cmd(live: bool = typer.Option(False, "--live", help="Send the questions to the real model")) -> None:
+def eval_cmd(
+    live: bool = typer.Option(False, "--live", help="Send the questions to the real model"),
+) -> None:
     """Run the eval suite. Offline by default: no key, no spend."""
     config = settings()
     warehouse = DuckDBWarehouse(config.assay_warehouse)

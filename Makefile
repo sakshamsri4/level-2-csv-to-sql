@@ -19,7 +19,9 @@ ask: ## Ask one business question: make ask Q="which route had the highest delay
 	uv run assay ask "$(Q)"
 
 app: ## Streamlit interface on http://localhost:8501
-	uv run streamlit run src/assay/app.py
+	# --server.headless: without it Streamlit blocks on an interactive email
+	# prompt the first time it is ever run, so `make app` fails on a fresh machine.
+	uv run streamlit run src/assay/app.py --server.headless true
 
 test: ## Run the test suite (no network, no API spend)
 	uv run pytest

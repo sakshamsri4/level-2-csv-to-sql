@@ -91,8 +91,20 @@ honest.
 
 **Safety.** Parse to AST → exactly one statement → root is `Select` or `With` →
 no `Insert/Update/Delete/Drop/Create/Alter/Attach/Copy/Command` node anywhere in
-the tree. Read-only connection underneath as belt and braces, so a validator bug
-cannot become data loss.
+the tree. Read-only connection underneath as belt and braces.
+
+**Correction (verified, Task 11).** An earlier draft of this spec claimed the
+read-only connection meant "a validator bug cannot become data loss". That is
+wrong, and the counter-example was reproduced against the real warehouse file.
+Read-only blocks `CREATE`, `DROP` and `INSERT`, on the main database and on any
+database attached to the connection. It does **not** block `COPY ... TO`, which
+executed and wrote a real 34,129-byte CSV; and it does **not** block `ATTACH` of
+an existing database file, which succeeded and allowed `SELECT` against another
+database on disk. So the read-only connection bounds damage to the *database* —
+it prevents mutation — while the AST denylist is the only thing protecting the
+*filesystem* and preventing data from leaving. `COPY`, `ATTACH`, `INSTALL` and
+table functions such as `read_csv()` are therefore refused explicitly by
+`check_sql` rather than left to the connection to catch.
 
 **Identifiers.** Collect every table and column reference, resolving CTE names
 and aliases so a valid `AS d` does not read as a hallucinated table, then diff
