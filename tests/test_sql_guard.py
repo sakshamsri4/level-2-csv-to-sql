@@ -275,3 +275,37 @@ def test_a_hallucinated_column_is_refused_when_a_subquery_projects_an_unaliased_
     )
     assert not v.ok
     assert v.kind == "unknown_identifier"
+
+
+def test_a_hallucinated_column_in_a_having_clause_is_refused():
+    v = check_sql(
+        "SELECT origin, count(*) FROM shipments GROUP BY origin HAVING bogus_col > 1", SCHEMA
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_hallucinated_column_in_a_qualify_windows_partition_by_is_refused():
+    v = check_sql(
+        "SELECT origin FROM shipments "
+        "QUALIFY row_number() OVER (PARTITION BY bogus_col ORDER BY delay_days) = 1",
+        SCHEMA,
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_select_list_alias_may_be_referenced_from_having():
+    v = check_sql(
+        "SELECT origin, count(*) AS n FROM shipments GROUP BY origin HAVING n > 5", SCHEMA
+    )
+    assert v.ok, v.reason
+
+
+def test_an_aggregate_over_a_real_column_in_having_is_allowed():
+    v = check_sql(
+        "SELECT origin, destination, avg(delay_days) AS d FROM shipments "
+        "GROUP BY 1,2 HAVING count(*) >= 10 ORDER BY d DESC",
+        SCHEMA,
+    )
+    assert v.ok, v.reason

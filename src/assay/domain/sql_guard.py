@@ -83,6 +83,23 @@ def _check_identifiers(root: exp.Expression, schema: Schema) -> Verdict:
         # the real ones is the entire point of this guardrail.
         return _unknown(f"{err}; the columns are {_render_schema(schema)}")
 
+    # sqlglot's resolver skips unqualified columns under HAVING and QUALIFY —
+    # it cannot tell them apart from select-list aliases, so it lets them be.
+    # Check them against every name the query could possibly mean. Loose on
+    # purpose: qualify() already did the precise work, and this only has to
+    # catch a name that exists nowhere at all.
+    known = set().union(*schema.values()) if schema else set()
+    known |= {alias.alias.lower() for alias in root.find_all(exp.Alias) if alias.alias}
+    for clause in root.find_all(exp.Having, exp.Qualify):
+        for column in clause.find_all(exp.Column):
+            if column.table or isinstance(column.this, exp.Star):
+                continue  # qualified columns and stars were resolved above
+            if column.name.lower() not in known:
+                return _unknown(
+                    f"there is no column named {column.name.lower()!r}; "
+                    f"the columns are {_render_schema(schema)}"
+                )
+
     return Verdict(ok=True)
 
 
