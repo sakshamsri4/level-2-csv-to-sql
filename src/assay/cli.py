@@ -3,13 +3,17 @@ pipeline return."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import typer
 
+from assay.adapters.duckdb_warehouse import DuckDBWarehouse
+from assay.adapters.openai_llm import OpenAILLM
 from assay.config import settings
 from assay.ingest.pipeline import ingest as pipeline_ingest
 from assay.ingest.pipeline import load_rules, profile
+from assay.service import ask as service_ask
 
 RULES_PATH = Path("config/cleaning_rules.yaml")
 
@@ -58,3 +62,21 @@ def ingest() -> None:
     typer.echo(f"shipments with no carrier   {report['shipments_without_carrier']}")
     typer.echo(f"carriers                    {report['carriers_loaded']}")
     typer.echo(f"\n-> {config.assay_warehouse}")
+
+
+@app.command()
+def ask(question: str) -> None:
+    """Ask one business question."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    config = settings()
+    answer = service_ask(
+        question,
+        OpenAILLM(config.assay_generation_model, config.openai_api_key),
+        DuckDBWarehouse(config.assay_warehouse),
+        config.assay_max_rows,
+    )
+    typer.echo(f"\n{answer.prose}\n")
+    if answer.sql:
+        typer.echo(f"  SQL: {answer.sql}")
+    if answer.refused:
+        raise typer.Exit(code=1)
