@@ -101,3 +101,75 @@ def test_a_write_statement_smuggled_inside_a_cte_body_is_refused():
     v = check_sql("WITH x AS (DELETE FROM shipments RETURNING *) SELECT * FROM x", SCHEMA)
     assert not v.ok
     assert v.kind == "unsafe"
+
+
+def test_a_column_that_does_not_exist_is_refused_with_the_real_columns_named():
+    v = check_sql("SELECT delivery_delay_days FROM shipments", SCHEMA)
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+    # The error must be actionable: it names the column that IS there.
+    assert "delivery_delay_days" in v.reason
+    assert "delay_days" in v.reason
+
+
+def test_a_table_that_does_not_exist_is_refused_with_the_real_tables_named():
+    v = check_sql("SELECT * FROM deliveries", SCHEMA)
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+    assert "shipments" in v.reason and "carriers" in v.reason
+
+
+def test_a_hallucinated_column_behind_a_table_alias_is_still_caught():
+    v = check_sql("SELECT s.bogus FROM shipments s", SCHEMA)
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_qualifier_that_names_no_table_in_the_query_is_refused():
+    v = check_sql("SELECT q.origin FROM shipments s", SCHEMA)
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_reading_a_file_from_disk_is_refused_as_an_unknown_table():
+    # read_csv() parses as a table with an empty name. The two guardrails
+    # compose: the safety check sees a plain SELECT, the schema check does not.
+    v = check_sql("SELECT * FROM read_csv('/etc/passwd')", SCHEMA)
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_valid_table_alias_is_not_mistaken_for_a_hallucinated_table():
+    v = check_sql("SELECT s.origin FROM shipments AS s", SCHEMA)
+    assert v.ok, v.reason
+
+
+def test_a_cte_name_is_not_mistaken_for_a_hallucinated_table():
+    v = check_sql(
+        "WITH late AS (SELECT * FROM shipments WHERE delay_days > 0) SELECT count(*) FROM late",
+        SCHEMA,
+    )
+    assert v.ok, v.reason
+
+
+def test_an_alias_on_a_cte_is_not_mistaken_for_a_hallucinated_table():
+    v = check_sql("WITH late AS (SELECT origin FROM shipments) SELECT l.origin FROM late l", SCHEMA)
+    assert v.ok, v.reason
+
+
+def test_a_subquery_alias_is_not_mistaken_for_a_hallucinated_table():
+    v = check_sql("SELECT x.origin FROM (SELECT origin FROM shipments) AS x", SCHEMA)
+    assert v.ok, v.reason
+
+
+def test_a_column_alias_defined_in_the_query_may_be_referenced():
+    v = check_sql("WITH t AS (SELECT count(*) AS n FROM shipments) SELECT n FROM t", SCHEMA)
+    assert v.ok, v.reason
+
+
+def test_function_names_are_not_mistaken_for_columns():
+    v = check_sql(
+        "SELECT date_trunc('month', shipped_date) AS m, count(*) FROM shipments GROUP BY 1",
+        SCHEMA,
+    )
+    assert v.ok, v.reason
