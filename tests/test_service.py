@@ -176,6 +176,41 @@ def test_a_database_execution_error_is_logged_with_its_own_verdict(caplog):
     assert lines[0]["refused"] is True
 
 
+def test_a_schema_lookup_that_fails_is_refused_not_raised():
+    # schema() is the very first call ask() makes, before any SQL exists to
+    # guard. A locked file or a corrupted database can fail here exactly as
+    # easily as inside run() — same WarehouseError, same refusal shape.
+    class UnreadableWarehouse:
+        def schema(self) -> dict[str, set[str]]:
+            raise WarehouseError("IO Error: database is locked")
+
+        def run(self, sql: str, max_rows: int) -> tuple[list[str], list[list[Any]]]:
+            raise AssertionError("run() must never be reached if schema() failed")
+
+    answer = ask("anything", FakeLLM(sql="SELECT 1"), UnreadableWarehouse(), max_rows=200)
+    assert answer.refused
+    assert answer.rows == []
+    assert "locked" in answer.prose
+
+
+def test_a_schema_lookup_failure_is_logged_with_its_own_verdict(caplog):
+    caplog.set_level(logging.INFO, logger="assay")
+
+    class UnreadableWarehouse:
+        def schema(self) -> dict[str, set[str]]:
+            raise WarehouseError("boom")
+
+        def run(self, sql: str, max_rows: int) -> tuple[list[str], list[list[Any]]]:
+            raise AssertionError("run() must never be reached if schema() failed")
+
+    ask("q", FakeLLM(sql="SELECT 1"), UnreadableWarehouse(), max_rows=200)
+
+    lines = [json.loads(record.message) for record in caplog.records]
+    assert len(lines) == 1
+    assert lines[0]["verdict"] == "execution_error"
+    assert lines[0]["refused"] is True
+
+
 def test_the_log_line_is_valid_json_carrying_what_observability_needs(caplog):
     """The JSON log line is the only observability artifact this project ships, so
     its shape is worth pinning directly rather than trusting _log()'s implementation

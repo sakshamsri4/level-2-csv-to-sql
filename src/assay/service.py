@@ -17,7 +17,22 @@ def ask(question: str, llm: LLM, warehouse: Warehouse, max_rows: int) -> Answer:
     """Question in, prose out — refusing before execution if the SQL is not safe
     and does not match the real schema."""
     started = time.monotonic()
-    schema = warehouse.schema()
+    try:
+        schema = warehouse.schema()
+    except WarehouseError as err:
+        # Fetching the catalogue is itself a database call — a locked file, an
+        # I/O error, a corrupted database — and it happens before any SQL has
+        # even been generated. Same failure shape as a run() error, so the
+        # same refusal and the same verdict.
+        answer = Answer(
+            question=question,
+            prose=f"That query was valid, but the database could not run it: {err}",
+            refused=True,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+        )
+        _log(answer, "execution_error")
+        return answer
+
     generated = llm.generate_sql(question, schema)
 
     if not generated.answerable:

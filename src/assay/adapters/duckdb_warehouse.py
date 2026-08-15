@@ -24,11 +24,19 @@ class DuckDBWarehouse:
         return duckdb.connect(str(self._path), read_only=True)
 
     def schema(self) -> Schema:
-        with self._connect() as con:
-            rows = con.execute(
-                "SELECT table_name, column_name FROM information_schema.columns "
-                "WHERE table_schema = 'main' ORDER BY table_name, ordinal_position"
-            ).fetchall()
+        """Reads the catalogue, not the tables — but a locked file, an I/O error,
+        or a corrupted database can still raise `duckdb.Error` here just as
+        easily as from `run()`. Same translation, same reason: the vendor stops
+        at the adapter.
+        """
+        try:
+            with self._connect() as con:
+                rows = con.execute(
+                    "SELECT table_name, column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'main' ORDER BY table_name, ordinal_position"
+                ).fetchall()
+        except duckdb.Error as err:
+            raise WarehouseError(str(err)) from err
         schema: Schema = {}
         for table, column in rows:
             schema.setdefault(str(table), set()).add(str(column))

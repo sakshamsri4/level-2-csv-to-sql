@@ -16,6 +16,7 @@ from assay.domain.sql_guard import check_sql
 from assay.evals import run_evals
 from assay.ingest.pipeline import ingest as pipeline_ingest
 from assay.ingest.pipeline import load_rules, profile
+from assay.ports import WarehouseError
 from assay.service import ask as service_ask
 
 RULES_PATH = Path("config/cleaning_rules.yaml")
@@ -72,12 +73,16 @@ def ask(question: str) -> None:
     """Ask one business question."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     config = settings()
-    answer = service_ask(
-        question,
-        OpenAILLM(config.assay_generation_model, config.openai_api_key),
-        DuckDBWarehouse(config.assay_warehouse),
-        config.assay_max_rows,
-    )
+    try:
+        answer = service_ask(
+            question,
+            OpenAILLM(config.assay_generation_model, config.openai_api_key),
+            DuckDBWarehouse(config.assay_warehouse),
+            config.assay_max_rows,
+        )
+    except (FileNotFoundError, WarehouseError) as err:
+        typer.echo(f"\n{err}\n")
+        raise typer.Exit(code=1) from err
     typer.echo(f"\n{answer.prose}\n")
     if answer.sql:
         typer.echo(f"  SQL: {answer.sql}")
@@ -92,7 +97,11 @@ def eval_cmd(
     """Run the eval suite. Offline by default: no key, no spend."""
     config = settings()
     warehouse = DuckDBWarehouse(config.assay_warehouse)
-    results = run_evals(Path("evals/cases.yaml"), warehouse)
+    try:
+        results = run_evals(Path("evals/cases.yaml"), warehouse)
+    except (FileNotFoundError, WarehouseError) as err:
+        typer.echo(f"\n{err}\n")
+        raise typer.Exit(code=1) from err
     for r in results:
         typer.echo(f"  {'PASS' if r.passed else 'FAIL'}  {r.id:32} {r.expect:20} {r.guards[:60]}")
     failed = [r for r in results if not r.passed]

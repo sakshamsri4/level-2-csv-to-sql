@@ -57,3 +57,15 @@ def test_a_query_the_data_cannot_satisfy_raises_the_port_error_not_the_vendors(w
 def test_opening_a_warehouse_that_was_never_built_says_so_plainly(tmp_path):
     with pytest.raises(FileNotFoundError, match="make ingest"):
         DuckDBWarehouse(tmp_path / "missing.duckdb").schema()
+
+
+def test_a_corrupted_database_file_raises_the_port_error_from_schema_too(tmp_path):
+    # schema() opens the connection and reads the catalogue before run() is ever
+    # called — a locked file, an I/O error, or (cheapest to trigger here) a file
+    # that exists but is not a valid DuckDB database can raise duckdb.Error from
+    # this path too. It must surface as WarehouseError, same as run().
+    junk = tmp_path / "not-a-database.duckdb"
+    junk.write_bytes(b"not a duckdb file")
+    with pytest.raises(WarehouseError) as excinfo:
+        DuckDBWarehouse(junk).schema()
+    assert not isinstance(excinfo.value, duckdb.Error)
