@@ -173,3 +173,46 @@ def test_function_names_are_not_mistaken_for_columns():
         SCHEMA,
     )
     assert v.ok, v.reason
+
+
+def test_a_hallucinated_column_is_not_legitimised_by_a_same_named_alias_in_a_sibling_scope():
+    v = check_sql(
+        "SELECT delivery_delay_days FROM shipments WHERE shipment_id IN "
+        "(SELECT count(*) AS delivery_delay_days FROM carriers)",
+        SCHEMA,
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_column_borrowed_from_a_cte_the_query_never_selects_from_is_refused():
+    v = check_sql(
+        "WITH recent AS (SELECT avg(delay_days) AS avg_delay FROM shipments) "
+        "SELECT avg_delay FROM carriers",
+        SCHEMA,
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_subquery_alias_shadowing_an_outer_alias_does_not_reject_the_outer_query():
+    v = check_sql(
+        "SELECT s.origin FROM shipments s WHERE EXISTS "
+        "(SELECT 1 FROM carriers s WHERE s.carrier_code IS NOT NULL)",
+        SCHEMA,
+    )
+    assert v.ok, v.reason
+
+
+def test_a_correlated_reference_to_an_outer_table_is_allowed():
+    v = check_sql(
+        "SELECT s.origin FROM shipments s WHERE EXISTS "
+        "(SELECT 1 FROM carriers c WHERE c.carrier_code = s.carrier_code)",
+        SCHEMA,
+    )
+    assert v.ok, v.reason
+
+
+def test_a_qualified_star_is_allowed():
+    v = check_sql("SELECT s.* FROM shipments s", SCHEMA)
+    assert v.ok, v.reason
