@@ -117,8 +117,14 @@ def eval_cmd(
             schema = warehouse.schema()
             for case in yaml.safe_load(Path("evals/cases.yaml").read_text()):
                 generated = llm.generate_sql(str(case["question"]), schema)
-                verdict = check_sql(generated.sql, schema)
-                state = "allowed" if verdict.ok else f"refused ({verdict.kind})"
+                # Mirror service.ask's decision order: answerable first, then
+                # check_sql. Showing only the check_sql verdict would report
+                # "allowed" for a question the running system actually refuses.
+                if not generated.answerable:
+                    state = "refused (unanswerable)"
+                else:
+                    verdict = check_sql(generated.sql, schema)
+                    state = "allowed" if verdict.ok else f"refused ({verdict.kind})"
                 typer.echo(f"  {case['id']:32} {state:26} {generated.sql[:70]}")
         except (WarehouseError, LLMError) as err:
             typer.echo(f"\n{err}\n")
