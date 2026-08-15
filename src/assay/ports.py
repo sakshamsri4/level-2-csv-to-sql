@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from assay.domain.models import GeneratedSQL
-
-# table name -> its column names. Both guardrails take exactly this and nothing more.
-Schema = dict[str, set[str]]
+from assay.domain.models import GeneratedSQL, Schema
 
 
 class LLM(Protocol):

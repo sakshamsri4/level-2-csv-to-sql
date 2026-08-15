@@ -90,3 +90,14 @@ def test_a_union_of_two_selects_is_still_a_read():
         "SELECT origin FROM shipments UNION ALL SELECT destination FROM shipments", SCHEMA
     )
     assert v.ok, v.reason
+
+
+def test_a_cte_query_is_allowed():
+    v = check_sql("WITH recent AS (SELECT * FROM shipments) SELECT * FROM recent", SCHEMA)
+    assert v.ok, v.reason
+
+
+def test_a_write_statement_smuggled_inside_a_cte_body_is_refused():
+    v = check_sql("WITH x AS (DELETE FROM shipments RETURNING *) SELECT * FROM x", SCHEMA)
+    assert not v.ok
+    assert v.kind == "unsafe"

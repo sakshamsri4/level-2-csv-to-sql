@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field
 
 VerdictKind = Literal["ok", "unsafe", "unknown_identifier"]
 
+# table name -> its column names. Both guardrails take exactly this and nothing more.
+Schema = dict[str, set[str]]
+
 
 class GeneratedSQL(BaseModel):
     """What the model returns. Structured, never scraped out of a code fence."""

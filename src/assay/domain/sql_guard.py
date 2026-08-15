@@ -9,8 +9,7 @@ from __future__ import annotations
 import sqlglot
 from sqlglot import exp
 
-from assay.domain.models import Verdict
-from assay.ports import Schema
+from assay.domain.models import Schema, Verdict
 
 DIALECT = "duckdb"
 
