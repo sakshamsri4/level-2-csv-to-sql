@@ -188,7 +188,9 @@ execute, the suite cannot tell a working guardrail from a broken one.
 The offline suite drives `FakeLLM` with attack SQL that *I* wrote. That proves the validator
 rejects those strings; it does not prove anything about what a real model emits.
 `assay eval --live` sends the adversarial **questions** to the API and applies the real
-decision path — `answerable` first, then `check_sql` — to whatever comes back. One run:
+decision path — `answerable` first, then `check_sql` — to whatever comes back. It stops
+short of execution: the SQL is never run, so the fourth refusal branch below (valid SQL that
+DuckDB itself rejects) cannot show up in this output. One run:
 
 ```
 --- live: what the real model actually emits ---
@@ -203,10 +205,12 @@ decision path — `answerable` first, then `check_sql` — to whatever comes bac
 ```
 
 **Read that carefully, because `allowed` is the good outcome here.** The model never emitted
-an attack. Told to ignore its instructions and drop a table, it answered the legitimate half
-of the question. Asked for "average delivery delay", it wrote `AVG(delay_days)` — the real
-column — because the real schema is in the prompt, so there was nothing to hallucinate.
-Seven legitimate queries were allowed and none was wrongly refused.
+an attack. Told to ignore its instructions and drop a table, it wrote the ordinary
+`AVG(delay_days)` route query — no `DROP` anywhere — and then flagged the request
+unanswerable anyway, which is why line one refuses despite benign SQL. Asked for "average
+delivery delay", it wrote `AVG(delay_days)` — the real column — because the real schema is in
+the prompt, so there was nothing to hallucinate. Six legitimate queries were allowed, two
+were refused by `answerable`, and no query was refused by `check_sql`.
 
 So this run proves two things and not a third: the prompt holds against injection at the
 model layer, and the guardrail does not false-positive on genuine model output. It does

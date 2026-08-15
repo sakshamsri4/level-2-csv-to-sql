@@ -126,7 +126,7 @@ def eval_cmd(
                     verdict = check_sql(generated.sql, schema)
                     state = "allowed" if verdict.ok else f"refused ({verdict.kind})"
                 typer.echo(f"  {case['id']:32} {state:26} {generated.sql[:70]}")
-        except (WarehouseError, LLMError) as err:
+        except (FileNotFoundError, WarehouseError, LLMError) as err:
             typer.echo(f"\n{err}\n")
             raise typer.Exit(code=1) from err
 

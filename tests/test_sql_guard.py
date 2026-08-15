@@ -322,6 +322,47 @@ def test_a_three_part_qualified_table_naming_a_foreign_catalog_is_refused():
     assert v.kind == "unknown_identifier"
 
 
+def test_a_cte_shadowing_a_real_table_name_cannot_smuggle_a_foreign_catalog_past_the_check():
+    # The CTE exemption ran before both the qualifier check and the
+    # "table must exist" check, so defining a throwaway CTE with the same bare
+    # name disarmed both — a 40-character prefix defeating the check directly
+    # above. A CTE reference is never qualified, so qualifiers are now judged
+    # first and the exemption only covers genuinely unqualified names.
+    v = check_sql(
+        "WITH shipments AS (SELECT 1 AS origin) SELECT origin FROM other_db.shipments",
+        SCHEMA,
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_cte_shadowing_a_table_name_cannot_smuggle_an_unknown_table_past_the_check():
+    v = check_sql(
+        "WITH deliveries AS (SELECT 1 AS origin) SELECT origin FROM other_db.deliveries",
+        SCHEMA,
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_real_cte_is_still_allowed_after_the_reordering():
+    # The guard against over-correcting: a legitimate CTE must keep working.
+    v = check_sql(
+        "WITH late AS (SELECT origin, delay_days FROM shipments WHERE delay_days > 0) "
+        "SELECT origin, count(*) AS n FROM late GROUP BY origin",
+        SCHEMA,
+    )
+    assert v.ok, v.reason
+
+
+def test_a_foreign_schema_in_the_middle_position_is_refused_not_just_the_leading_one():
+    # `(table.catalog or table.db)` short-circuits on the first non-empty part,
+    # so a real leading catalog hid whatever sat in the schema position.
+    v = check_sql("SELECT origin FROM main.other_schema.shipments", SCHEMA)
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
 def test_an_aggregate_over_a_real_column_in_having_is_allowed():
     v = check_sql(
         "SELECT origin, destination, avg(delay_days) AS d FROM shipments "

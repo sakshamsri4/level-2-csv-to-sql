@@ -59,22 +59,28 @@ def _check_identifiers(root: exp.Expression, schema: Schema) -> Verdict:
     ctes = {cte.alias_or_name.lower() for cte in root.find_all(exp.CTE)}
     for table in root.find_all(exp.Table):
         name = table.name.lower()
+        # Qualifiers are judged BEFORE the CTE exemption, and this ordering is
+        # load-bearing: a CTE reference is never qualified, so anything carrying
+        # a qualifier is a real table regardless of what the query defines for
+        # itself. Checking the exemption first let `WITH shipments AS (...)
+        # SELECT ... FROM other_db.shipments` shadow the bare name and skip both
+        # this check and the schema check below.
+        #
+        # sqlglot splits a reference across `.catalog` and `.db` by arity, so
+        # both positions are checked — testing only the first non-empty one let
+        # a real leading catalog hide a foreign schema behind it.
+        foreign = {q.lower() for q in (table.catalog, table.db) if q} - {"main"}
+        if foreign:
+            return _unknown(
+                f"table {name!r} is qualified with {sorted(foreign)}; "
+                f"only unqualified tables are allowed: {sorted(schema)}"
+            )
         if name in ctes:
             continue  # a name the query defines for itself, not a real table
         if not name:
             return _unknown(
                 "table functions such as read_csv() are not allowed; "
                 f"query only these tables: {sorted(schema)}"
-            )
-        # sqlglot puts a two-part reference's qualifier in `.db` and a
-        # three-part reference's leading qualifier in `.catalog`. Either one
-        # naming something other than "main" reaches outside this warehouse —
-        # ATTACH is refused, so nothing else should be reachable this way.
-        qualifier = (table.catalog or table.db or "").lower()
-        if qualifier and qualifier != "main":
-            return _unknown(
-                f"table {name!r} is qualified with {qualifier!r}; "
-                f"only unqualified tables are allowed: {sorted(schema)}"
             )
         if name not in schema:
             return _unknown(f"there is no table named {name!r}; the tables are {sorted(schema)}")

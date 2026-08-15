@@ -12,6 +12,7 @@ import openai
 import pytest
 
 from assay.adapters.openai_llm import OpenAILLM
+from assay.domain.models import GeneratedSQL
 from assay.ports import LLMError
 
 SCHEMA = {"shipments": {"origin", "delay_days"}}
@@ -59,6 +60,32 @@ def test_generate_sql_raises_llm_error_when_the_model_returns_no_parsed_output()
     llm._client.chat.completions.parse = lambda *a, **kw: _Completion()  # type: ignore[method-assign]
 
     with pytest.raises(LLMError, match="no structured output"):
+        llm.generate_sql("how many shipments were late?", SCHEMA)
+
+
+def test_generate_sql_translates_a_response_that_fails_schema_validation():
+    # pydantic raises ValidationError from inside .parse() when the response
+    # body does not satisfy GeneratedSQL. It is a ValueError, NOT an
+    # OpenAIError, so catching only the SDK base class let it reach the
+    # terminal as a traceback — in the one adapter whose stated job is that
+    # every failure becomes an LLMError.
+    llm = OpenAILLM("gpt-4o-mini", "test-key")
+
+    def _bad_shape(*args: object, **kwargs: object) -> None:
+        GeneratedSQL.model_validate({"sql": 1234})
+
+    llm._client.chat.completions.parse = _bad_shape  # type: ignore[method-assign]
+
+    with pytest.raises(LLMError):
+        llm.generate_sql("how many shipments were late?", SCHEMA)
+
+
+def test_generate_sql_translates_an_empty_choices_list():
+    llm = OpenAILLM("gpt-4o-mini", "test-key")
+
+    llm._client.chat.completions.parse = lambda *a, **kw: _Completion(choices=[])  # type: ignore[method-assign]
+
+    with pytest.raises(LLMError):
         llm.generate_sql("how many shipments were late?", SCHEMA)
 
 
