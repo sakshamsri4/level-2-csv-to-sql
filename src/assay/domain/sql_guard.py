@@ -51,6 +51,28 @@ def _sources(scope: Scope) -> dict[str, exp.Table | Scope]:
     return {name.lower(): node_source[1] for name, node_source in scope.selected_sources.items()}
 
 
+def _exposed(scope: Scope) -> set[str] | None:
+    """The column names a CTE or subquery exposes to whoever selects from it.
+
+    None when a star inside it makes them un-enumerable — the only case where we
+    still have to take the source's word for it.
+    """
+    block = scope.expression
+    if not isinstance(block, exp.Query):
+        return None
+    names: set[str] = set()
+    for projection in block.selects:
+        if isinstance(projection, exp.Star) or (
+            isinstance(projection, exp.Column) and isinstance(projection.this, exp.Star)
+        ):
+            return None
+        name = projection.alias_or_name
+        if not name:
+            return None
+        names.add(name.lower())
+    return names
+
+
 def _check_identifiers(root: exp.Expression, schema: Schema) -> Verdict:
     """Every table and column the query names must exist in the real catalogue.
 
@@ -69,7 +91,11 @@ def _check_identifiers(root: exp.Expression, schema: Schema) -> Verdict:
         opaque: set[str] = set()
         for name, source in _sources(scope).items():
             if not isinstance(source, exp.Table):
-                opaque.add(name)  # a CTE or subquery; its columns are its own business
+                exposed = _exposed(source)
+                if exposed is None:
+                    opaque.add(name)  # a star inside it; its columns are its own business
+                else:
+                    tables[name] = exposed
                 continue
             real = source.name.lower()
             if not real:
@@ -96,9 +122,11 @@ def _check_identifiers(root: exp.Expression, schema: Schema) -> Verdict:
                 continue  # `s.*` names no single column
             qualifier, name = column.table.lower(), column.name.lower()
             if not qualifier:
-                if opaque:
+                if name in anywhere or name in local:
                     continue
-                allowed = anywhere
+                if opaque:
+                    continue  # an un-enumerable source may legitimately expose it
+                return _unknown(f"there is no column named {name!r}; available: {sorted(anywhere)}")
             elif qualifier in opaque:
                 continue
             elif qualifier in tables:
@@ -111,9 +139,13 @@ def _check_identifiers(root: exp.Expression, schema: Schema) -> Verdict:
                     outer = outer.parent
                 if found is None:
                     return _unknown(f"{qualifier!r} is not a table or alias in this query")
-                if not isinstance(found, exp.Table):
-                    continue
-                allowed = schema.get(found.name.lower(), set())
+                if isinstance(found, exp.Table):
+                    allowed = schema.get(found.name.lower(), set())
+                else:
+                    exposed = _exposed(found)
+                    if exposed is None:
+                        continue
+                    allowed = exposed
             if name not in allowed and name not in local:
                 return _unknown(f"there is no column named {name!r}; available: {sorted(allowed)}")
 

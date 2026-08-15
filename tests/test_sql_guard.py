@@ -216,3 +216,35 @@ def test_a_correlated_reference_to_an_outer_table_is_allowed():
 def test_a_qualified_star_is_allowed():
     v = check_sql("SELECT s.* FROM shipments s", SCHEMA)
     assert v.ok, v.reason
+
+
+def test_an_unqualified_hallucinated_column_is_refused_even_when_a_subquery_is_also_joined():
+    v = check_sql(
+        "SELECT bogus_column FROM shipments JOIN (SELECT origin FROM shipments) AS x ON true",
+        SCHEMA,
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_an_unqualified_hallucinated_column_is_refused_even_when_a_cte_is_also_in_the_from_list():
+    v = check_sql(
+        "WITH x AS (SELECT origin FROM shipments) SELECT bogus_column FROM shipments, x", SCHEMA
+    )
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_column_a_subquery_does_not_expose_is_refused():
+    v = check_sql("SELECT x.bogus FROM (SELECT origin FROM shipments) x", SCHEMA)
+    assert not v.ok
+    assert v.kind == "unknown_identifier"
+
+
+def test_a_column_from_a_star_cte_is_allowed_because_its_columns_cannot_be_enumerated():
+    # Deliberate limit of the guard, not an oversight: SELECT * inside a CTE makes
+    # its output columns un-enumerable, so we defer to the database rather than guess.
+    v = check_sql(
+        "WITH late AS (SELECT * FROM shipments) SELECT whatever_it_exposes FROM late", SCHEMA
+    )
+    assert v.ok, v.reason
