@@ -1,0 +1,45 @@
+# Cleaning rules for the legacy shipment extracts.
+#
+# This file is data, not code: a logistics analyst should be able to add a new
+# depot spelling or a new date format without opening a Python file. All
+# matching is done on lower(trim(value)), so list each alias once, lower case.
+
+# Tried in order against every date column. The first that parses wins.
+date_formats:
+  - "%Y-%m-%d"      # 2024-07-14
+  - "%d/%m/%Y"      # 14/07/2024
+  - "%b %d %Y"      # Jul 14 2024
+  - "%Y%m%d"        # 20240714
+
+# Values that mean "no value". Anything here becomes SQL NULL.
+null_markers: ["", "null", "n/a", "-", "none", "unknown"]
+
+# Every spelling the legacy systems used -> the canonical location code.
+# An alias table, not fuzzy matching: fuzzy matching silently merges two real
+# cities, and an unmatched name here is reported rather than guessed.
+locations:
+  LAX: ["lax", "los angeles, ca", "los angeles"]
+  JFK: ["jfk", "new york, ny", "new york", "nyc"]
+  ORD: ["ord", "chicago, il", "chicago il", "chicago"]
+  DFW: ["dfw", "dallas, tx", "dallas"]
+  SEA: ["sea", "seattle, wa", "seattle"]
+  ATL: ["atl", "atlanta, ga", "atlanta"]
+
+# The extracts disagree on header names and column order.
+# canonical field -> the header spellings seen in the wild.
+columns:
+  shipment_id: [shipment_id, id]
+  carrier_code: [carrier, carrier_code]
+  origin: [origin, from_loc]
+  destination: [destination, to_loc]
+  shipped_date: [shipped, ship_date]
+  promised_date: [promised, promise_date]
+  delivered_date: [delivered, delivery_date]
+  weight_kg: [weight_kg, weight]
+  cost_usd: [cost_usd, cost]
+  status: [status]
+
+# Free-text status -> the canonical value.
+statuses:
+  delivered: ["delivered"]
+  in_transit: ["in_transit", "in transit"]
