@@ -56,10 +56,18 @@ class Verdict(BaseModel):
 
 
 class Answer(BaseModel):
+    """What ask() hands back, including *why* it decided what it decided.
+
+    `kind` is the verdict, carried rather than re-derived: the eval runner and
+    the live eval both need it, and computing a second opinion from check_sql
+    gave two routes to one answer that had to be kept in agreement by hand.
+    """
+
     question: str
     sql: str = ""
     columns: list[str] = Field(default_factory=list)
     rows: list[list[Any]] = Field(default_factory=list)
     prose: str = ""
     refused: bool = False
+    kind: LogVerdict = "ok"
     elapsed_ms: int = 0

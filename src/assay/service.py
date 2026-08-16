@@ -17,6 +17,19 @@ def ask(question: str, llm: LLM, warehouse: Warehouse, max_rows: int) -> Answer:
     """Question in, prose out — refusing before execution if the SQL is not safe
     and does not match the real schema."""
     started = time.monotonic()
+
+    def refuse(prose: str, kind: LogVerdict, sql: str = "") -> Answer:
+        answer = Answer(
+            question=question,
+            sql=sql,
+            prose=prose,
+            refused=True,
+            kind=kind,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+        )
+        _log(answer)
+        return answer
+
     try:
         schema = warehouse.schema()
     except WarehouseError as err:
@@ -24,40 +37,24 @@ def ask(question: str, llm: LLM, warehouse: Warehouse, max_rows: int) -> Answer:
         # I/O error, a corrupted database — and it happens before any SQL has
         # even been generated. Same failure shape as a run() error, so the
         # same refusal and the same verdict.
-        answer = Answer(
-            question=question,
-            prose=f"That query was valid, but the database could not run it: {err}",
-            refused=True,
-            elapsed_ms=int((time.monotonic() - started) * 1000),
+        return refuse(
+            f"That query was valid, but the database could not run it: {err}",
+            "execution_error",
         )
-        _log(answer, "execution_error")
-        return answer
 
     generated = llm.generate_sql(question, schema)
 
     if not generated.answerable:
-        answer = Answer(
-            question=question,
-            sql=generated.sql,
-            prose=f"{generated.rationale} I did not run a substitute query, "
+        return refuse(
+            f"{generated.rationale} I did not run a substitute query, "
             "since a number answering a different question is worse than no answer.",
-            refused=True,
-            elapsed_ms=int((time.monotonic() - started) * 1000),
+            "unanswerable",
+            generated.sql,
         )
-        _log(answer, "unanswerable")
-        return answer
 
     verdict = check_sql(generated.sql, schema)
     if not verdict.ok:
-        answer = Answer(
-            question=question,
-            sql=generated.sql,
-            prose=f"I did not run that query. {verdict.reason}",
-            refused=True,
-            elapsed_ms=int((time.monotonic() - started) * 1000),
-        )
-        _log(answer, verdict.kind)
-        return answer
+        return refuse(f"I did not run that query. {verdict.reason}", verdict.kind, generated.sql)
 
     try:
         columns, rows = warehouse.run(generated.sql, max_rows)
@@ -67,15 +64,11 @@ def ask(question: str, llm: LLM, warehouse: Warehouse, max_rows: int) -> Answer:
         # value it cannot convert, for one). That is not a hallucination and
         # not an attack, so it gets its own verdict rather than being folded
         # into either guardrail's.
-        answer = Answer(
-            question=question,
-            sql=generated.sql,
-            prose=f"That query was valid, but the database could not run it: {err}",
-            refused=True,
-            elapsed_ms=int((time.monotonic() - started) * 1000),
+        return refuse(
+            f"That query was valid, but the database could not run it: {err}",
+            "execution_error",
+            generated.sql,
         )
-        _log(answer, "execution_error")
-        return answer
 
     answer = Answer(
         question=question,
@@ -85,18 +78,18 @@ def ask(question: str, llm: LLM, warehouse: Warehouse, max_rows: int) -> Answer:
         prose=llm.summarise(question, generated.sql, columns, rows),
         elapsed_ms=int((time.monotonic() - started) * 1000),
     )
-    _log(answer, "ok")
+    _log(answer)
     return answer
 
 
-def _log(answer: Answer, verdict: LogVerdict) -> None:
+def _log(answer: Answer) -> None:
     log.info(
         json.dumps(
             {
                 "event": "ask",
                 "question": answer.question,
                 "sql": answer.sql,
-                "verdict": verdict,
+                "verdict": answer.kind,
                 "refused": answer.refused,
                 "rows": len(answer.rows),
                 "elapsed_ms": answer.elapsed_ms,

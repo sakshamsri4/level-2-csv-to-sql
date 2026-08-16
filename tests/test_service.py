@@ -244,3 +244,53 @@ def test_the_log_line_is_valid_json_carrying_what_observability_needs(caplog):
     assert refusal_line["refused"] is True
     assert success_line["verdict"] == "ok"
     assert success_line["refused"] is False
+
+
+def test_the_answer_carries_the_verdict_that_produced_it():
+    # Callers should not have to re-derive why ask() decided what it decided.
+    # evals.py used to re-run check_sql to recover exactly this.
+    warehouse = FakeWarehouse()
+
+    good = ask("good", FakeLLM(sql="SELECT origin FROM shipments"), warehouse, max_rows=200)
+    unsafe = ask("bad", FakeLLM(sql="DROP TABLE shipments"), warehouse, max_rows=200)
+    bogus = ask("huh", FakeLLM(sql="SELECT nope FROM shipments"), warehouse, max_rows=200)
+    cannot = ask(
+        "impossible",
+        FakeLLM(sql="SELECT origin FROM shipments", answerable=False),
+        warehouse,
+        max_rows=200,
+    )
+
+    assert good.kind == "ok"
+    assert unsafe.kind == "unsafe"
+    assert bogus.kind == "unknown_identifier"
+    assert cannot.kind == "unanswerable"
+
+
+def test_a_refused_answer_never_reports_an_ok_verdict():
+    """The invariant evals.py used to re-check per case: refused and kind cannot
+    disagree. Asserting it once here is what lets the eval runner trust
+    answer.kind instead of computing a second opinion from check_sql."""
+
+    class BrokenWarehouse:
+        def schema(self) -> dict[str, set[str]]:
+            return SCHEMA
+
+        def run(self, sql: str, max_rows: int) -> tuple[list[str], list[list[Any]]]:
+            raise WarehouseError("boom")
+
+    answers = [
+        ask("good", FakeLLM(sql="SELECT origin FROM shipments"), FakeWarehouse(), max_rows=200),
+        ask("bad", FakeLLM(sql="DROP TABLE shipments"), FakeWarehouse(), max_rows=200),
+        ask("huh", FakeLLM(sql="SELECT nope FROM shipments"), FakeWarehouse(), max_rows=200),
+        ask(
+            "impossible",
+            FakeLLM(sql="SELECT origin FROM shipments", answerable=False),
+            FakeWarehouse(),
+            max_rows=200,
+        ),
+        ask("broken", FakeLLM(sql="SELECT origin FROM shipments"), BrokenWarehouse(), max_rows=200),
+    ]
+
+    for answer in answers:
+        assert answer.refused == (answer.kind != "ok")
