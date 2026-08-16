@@ -5,12 +5,19 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 
 from assay.domain.models import Answer, GeneratedSQL, LogVerdict, Schema
 from assay.domain.sql_guard import check_sql
 from assay.ports import LLM, Warehouse, WarehouseError
 
 log = logging.getLogger("assay")
+
+# One id per process, stamped on every log line. There is exactly one line per
+# ask, so a line carries no way to be grouped with its neighbours on its own —
+# and "it refused my question" is a report about a sitting, not about one
+# question. This is what makes those lines readable in order afterwards.
+SESSION_ID = uuid.uuid4().hex[:8]
 
 
 def decide(generated: GeneratedSQL, schema: Schema) -> tuple[LogVerdict, str]:
@@ -99,6 +106,7 @@ def _log(answer: Answer) -> None:
         json.dumps(
             {
                 "event": "ask",
+                "session": SESSION_ID,
                 "question": answer.question,
                 "sql": answer.sql,
                 "verdict": answer.kind,
