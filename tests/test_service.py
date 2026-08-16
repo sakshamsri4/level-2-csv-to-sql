@@ -297,6 +297,24 @@ def test_a_refused_answer_never_reports_an_ok_verdict():
         assert answer.refused == (answer.kind != "ok")
 
 
+def test_every_log_line_carries_the_session_id_that_joins_them(caplog):
+    """One log line per ask is not joinable on its own: a user reporting "it
+    refused my question" cannot be tied to the other questions they asked in
+    the same sitting. A per-process id is what turns isolated lines into a
+    session you can read in order."""
+    caplog.set_level(logging.INFO, logger="assay")
+    warehouse = FakeWarehouse()
+
+    ask("one", FakeLLM(sql="SELECT origin FROM shipments"), warehouse, max_rows=200)
+    ask("two", FakeLLM(sql="DROP TABLE shipments"), warehouse, max_rows=200)
+
+    lines = [json.loads(record.message) for record in caplog.records]
+    assert len(lines) == 2
+    sessions = {line["session"] for line in lines}
+    assert len(sessions) == 1, "asks in one process must share one session id"
+    assert sessions.pop(), "the session id must not be empty"
+
+
 def test_an_unanswerable_flag_outranks_a_perfectly_valid_query():
     """decide() is what keeps `assay eval --live` honest. The SQL below is valid
     — real table, real column, one SELECT — so check_sql alone calls it ok. If
