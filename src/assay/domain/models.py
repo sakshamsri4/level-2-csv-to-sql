@@ -46,9 +46,12 @@ class Verdict(BaseModel):
     was refused — a suite that only checks "rejected" cannot tell a schema
     rejection from a parse failure."""
 
-    ok: bool
     kind: VerdictKind = "ok"
     reason: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.kind == "ok"
 
 
 class Answer(BaseModel):

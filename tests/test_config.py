@@ -21,10 +21,17 @@ def test_settings_have_working_defaults_without_any_environment():
 
 
 def test_a_refusal_carries_its_reason_and_no_rows():
-    v = Verdict(ok=False, kind="unsafe", reason="only SELECT is allowed")
+    v = Verdict(kind="unsafe", reason="only SELECT is allowed")
     answer = Answer(question="q", prose=v.reason, refused=True)
     assert answer.rows == []
     assert answer.refused
+
+
+def test_a_verdict_is_ok_exactly_when_its_kind_says_so():
+    # ok and kind cannot disagree, because there is only one of them.
+    assert Verdict().ok
+    assert not Verdict(kind="unsafe", reason="only SELECT is allowed").ok
+    assert not Verdict(kind="unknown_identifier", reason="no such column").ok
 
 
 def test_generated_sql_requires_both_fields():
