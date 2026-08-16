@@ -16,6 +16,17 @@ every defect in it is *known*, which is what makes the profile counts below chec
 rather than merely plausible. Point `ASSAY_RAW_DIR` at real extracts and nothing else
 changes.
 
+**Where to look**, depending on why you are here:
+
+| You want | Go to |
+| --- | --- |
+| To see it answer a real question | [The worked example](#the-worked-example) |
+| To run it yourself | [Quickstart](#quickstart) |
+| The business case | [How the business measures ROI](#how-the-business-measures-roi) |
+| How it defends itself | [The two guardrails](#the-two-guardrails) |
+| Why it is built this way | [How it is put together](#how-it-is-put-together) · [Trade-offs](#trade-offs) |
+| What it deliberately will not do | [What it does not do](#what-it-does-not-do) |
+
 ## The worked example
 
 This is a real run, not a mock-up. The question is the brief's own headline question:
