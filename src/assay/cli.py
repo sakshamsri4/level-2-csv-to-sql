@@ -24,11 +24,6 @@ RULES_PATH = Path("config/cleaning_rules.yaml")
 app = typer.Typer(add_completion=False, help="Clean messy shipment CSVs and ask questions of them.")
 
 
-@app.callback()
-def _main() -> None:
-    """Clean messy shipment CSVs and ask questions of them."""
-
-
 @app.command("profile")
 def profile_raw() -> None:
     """Report what is wrong with the raw CSVs, before anything is fixed."""
