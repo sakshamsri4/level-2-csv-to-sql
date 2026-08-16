@@ -5,8 +5,9 @@ from typing import Any
 import pytest
 
 from assay.adapters.fakes import FakeLLM
+from assay.domain.models import GeneratedSQL
 from assay.ports import WarehouseError
-from assay.service import ask
+from assay.service import ask, decide
 
 SCHEMA = {
     "shipments": {"shipment_id", "origin", "destination", "delay_days"},
@@ -294,3 +295,19 @@ def test_a_refused_answer_never_reports_an_ok_verdict():
 
     for answer in answers:
         assert answer.refused == (answer.kind != "ok")
+
+
+def test_an_unanswerable_flag_outranks_a_perfectly_valid_query():
+    """decide() is what keeps `assay eval --live` honest. The SQL below is valid
+    — real table, real column, one SELECT — so check_sql alone calls it ok. If
+    the answerable flag were consulted second, --live would print "allowed" for
+    a question the running system actually refuses."""
+    valid = GeneratedSQL(sql="SELECT origin FROM shipments", rationale="x", answerable=False)
+    kind, prose = decide(valid, SCHEMA)
+    assert kind == "unanswerable"
+    assert "x" in prose
+
+    answerable = GeneratedSQL(sql="SELECT origin FROM shipments", rationale="fine")
+    kind, prose = decide(answerable, SCHEMA)
+    assert kind == "ok"
+    assert prose == ""

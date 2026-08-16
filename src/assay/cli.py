@@ -12,12 +12,12 @@ import yaml
 from assay.adapters.duckdb_warehouse import DuckDBWarehouse
 from assay.adapters.openai_llm import OpenAILLM
 from assay.config import settings
-from assay.domain.sql_guard import check_sql
 from assay.evals import run_evals
 from assay.ingest.pipeline import ingest as pipeline_ingest
 from assay.ingest.pipeline import load_rules, profile
 from assay.ports import LLMError, WarehouseError
 from assay.service import ask as service_ask
+from assay.service import decide
 
 RULES_PATH = Path("config/cleaning_rules.yaml")
 
@@ -112,14 +112,8 @@ def eval_cmd(
             schema = warehouse.schema()
             for case in yaml.safe_load(Path("evals/cases.yaml").read_text()):
                 generated = llm.generate_sql(str(case["question"]), schema)
-                # Mirror service.ask's decision order: answerable first, then
-                # check_sql. Showing only the check_sql verdict would report
-                # "allowed" for a question the running system actually refuses.
-                if not generated.answerable:
-                    state = "refused (unanswerable)"
-                else:
-                    verdict = check_sql(generated.sql, schema)
-                    state = "allowed" if verdict.ok else f"refused ({verdict.kind})"
+                kind, _ = decide(generated, schema)
+                state = "allowed" if kind == "ok" else f"refused ({kind})"
                 typer.echo(f"  {case['id']:32} {state:26} {generated.sql[:70]}")
         except (FileNotFoundError, WarehouseError, LLMError) as err:
             typer.echo(f"\n{err}\n")

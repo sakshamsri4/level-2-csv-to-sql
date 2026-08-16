@@ -6,11 +6,31 @@ import json
 import logging
 import time
 
-from assay.domain.models import Answer, LogVerdict
+from assay.domain.models import Answer, GeneratedSQL, LogVerdict, Schema
 from assay.domain.sql_guard import check_sql
 from assay.ports import LLM, Warehouse, WarehouseError
 
 log = logging.getLogger("assay")
+
+
+def decide(generated: GeneratedSQL, schema: Schema) -> tuple[LogVerdict, str]:
+    """The verdict for a generated query, and the sentence explaining it.
+
+    Both ask() and `assay eval --live` consult this, so the order the two
+    signals are read in cannot drift between them. The order is load-bearing:
+    an unanswerable question's SQL is usually valid on its own, so consulting
+    check_sql first would call it allowed and hide the refusal the running
+    system actually makes.
+    """
+    if not generated.answerable:
+        return "unanswerable", (
+            f"{generated.rationale} I did not run a substitute query, "
+            "since a number answering a different question is worse than no answer."
+        )
+    verdict = check_sql(generated.sql, schema)
+    if not verdict.ok:
+        return verdict.kind, f"I did not run that query. {verdict.reason}"
+    return "ok", ""
 
 
 def ask(question: str, llm: LLM, warehouse: Warehouse, max_rows: int) -> Answer:
@@ -44,17 +64,9 @@ def ask(question: str, llm: LLM, warehouse: Warehouse, max_rows: int) -> Answer:
 
     generated = llm.generate_sql(question, schema)
 
-    if not generated.answerable:
-        return refuse(
-            f"{generated.rationale} I did not run a substitute query, "
-            "since a number answering a different question is worse than no answer.",
-            "unanswerable",
-            generated.sql,
-        )
-
-    verdict = check_sql(generated.sql, schema)
-    if not verdict.ok:
-        return refuse(f"I did not run that query. {verdict.reason}", verdict.kind, generated.sql)
+    kind, prose = decide(generated, schema)
+    if kind != "ok":
+        return refuse(prose, kind, generated.sql)
 
     try:
         columns, rows = warehouse.run(generated.sql, max_rows)
