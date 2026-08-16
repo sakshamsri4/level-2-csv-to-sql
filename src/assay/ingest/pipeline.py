@@ -249,12 +249,13 @@ def profile(raw_dir: Path, rules: Rules) -> list[dict[str, Any]]:
     for path in shipment_files(raw_dir):
         con.execute(f"CREATE OR REPLACE TEMP VIEW raw AS {_select_canonical(path, rules, con)}")
 
-        nulls = {
-            field: int(
-                _fetchone(con, f"SELECT count(*) FROM raw WHERE {scrub(field, rules)} IS NULL")[0]
-            )
-            for field in CANONICAL
-        }
+        null_counts = _fetchone(
+            con,
+            "SELECT "
+            + ", ".join(f"count(*) FILTER (WHERE {scrub(f, rules)} IS NULL)" for f in CANONICAL)
+            + " FROM raw",
+        )
+        nulls = {field: int(null_counts[i]) for i, field in enumerate(CANONICAL)}
         formats = {
             fmt: int(
                 _fetchone(

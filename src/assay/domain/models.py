@@ -11,8 +11,9 @@ VerdictKind = Literal["ok", "unsafe", "unknown_identifier"]
 # Every value _log() can ever emit: the guardrail's own VerdictKind, plus the two
 # refusal causes that never touch check_sql at all — one decided before it ever
 # runs (unanswerable), one only discoverable after both guardrails already said
-# yes and the database itself refused (execution_error).
-LogVerdict = Literal["ok", "unsafe", "unknown_identifier", "unanswerable", "execution_error"]
+# yes and the database itself refused (execution_error). Composed from
+# VerdictKind rather than restated, so the two cannot drift apart.
+LogVerdict = VerdictKind | Literal["unanswerable", "execution_error"]
 
 # table name -> its column names. Both guardrails take exactly this and nothing more.
 Schema = dict[str, set[str]]
@@ -46,16 +47,27 @@ class Verdict(BaseModel):
     was refused — a suite that only checks "rejected" cannot tell a schema
     rejection from a parse failure."""
 
-    ok: bool
     kind: VerdictKind = "ok"
     reason: str = ""
 
+    @property
+    def ok(self) -> bool:
+        return self.kind == "ok"
+
 
 class Answer(BaseModel):
+    """What ask() hands back, including *why* it decided what it decided.
+
+    `kind` is the verdict, carried rather than re-derived: the eval runner and
+    the live eval both need it, and computing a second opinion from check_sql
+    gave two routes to one answer that had to be kept in agreement by hand.
+    """
+
     question: str
     sql: str = ""
     columns: list[str] = Field(default_factory=list)
     rows: list[list[Any]] = Field(default_factory=list)
     prose: str = ""
     refused: bool = False
+    kind: LogVerdict = "ok"
     elapsed_ms: int = 0

@@ -39,11 +39,11 @@ FORBIDDEN = (
 
 
 def _unsafe(reason: str) -> Verdict:
-    return Verdict(ok=False, kind="unsafe", reason=reason)
+    return Verdict(kind="unsafe", reason=reason)
 
 
 def _unknown(reason: str) -> Verdict:
-    return Verdict(ok=False, kind="unknown_identifier", reason=reason)
+    return Verdict(kind="unknown_identifier", reason=reason)
 
 
 def _render_schema(schema: Schema) -> str:
@@ -136,7 +136,7 @@ def _check_identifiers(root: exp.Expression, schema: Schema) -> Verdict:
                     f"the columns are {_render_schema(schema)}"
                 )
 
-    return Verdict(ok=True)
+    return Verdict()
 
 
 def check_sql(sql: str, schema: Schema) -> Verdict:

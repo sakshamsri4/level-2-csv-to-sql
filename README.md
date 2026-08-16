@@ -11,7 +11,7 @@ estimated or recalled. The one place a figure is a judgement rather than a measu
 flagged as such, in the ROI section.
 
 A note on the data: the client brief supplied a scenario but no files, so `data/raw/*.csv`
-is written by a seeded generator (`src/assay/ingest/generate.py`). That is deliberate —
+is written by a seeded generator (`tools/generate_raw.py`). That is deliberate —
 every defect in it is *known*, which is what makes the profile counts below checkable
 rather than merely plausible. Point `ASSAY_RAW_DIR` at real extracts and nothing else
 changes.

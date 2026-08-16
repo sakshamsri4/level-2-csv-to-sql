@@ -10,6 +10,7 @@ from typing import Any
 import duckdb
 import pytest
 import typer
+from typer.testing import CliRunner
 
 from assay import cli
 from assay.config import Settings
@@ -174,3 +175,14 @@ def test_a_passing_eval_case_does_not_print_got_or_reason(tmp_path, monkeypatch,
     assert "PASS" in out and "fine_case" in out
     assert "got:" not in out
     assert "reason:" not in out
+
+
+def test_the_cli_help_names_the_tool_and_all_four_commands():
+    # The only thing the removed @app.callback() ever contributed was help
+    # text, and Typer(help=...) already supplies it. This pins that.
+    result = CliRunner().invoke(cli.app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "Clean messy shipment CSVs" in result.output
+    for command in ("profile", "ingest", "ask", "eval"):
+        assert command in result.output
