@@ -3,7 +3,7 @@
 Dev tool. Run once, commit the output. Seeded, so every defect is *known* —
 that is what makes `make profile` counts verifiable rather than guessed.
 
-    uv run python -m assay.ingest.generate
+    uv run python tools/generate_raw.py
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from random import Random
 
-RAW = Path(__file__).resolve().parents[3] / "data" / "raw"
+RAW = Path(__file__).resolve().parents[1] / "data" / "raw"
 
 CARRIERS: list[tuple[str, str, str]] = [
     ("BLZ", "Blizzard Freight", "express"),

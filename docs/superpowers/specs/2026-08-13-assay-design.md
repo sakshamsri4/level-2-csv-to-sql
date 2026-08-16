@@ -19,8 +19,9 @@ src/assay/
     sql_guard.py         both guardrails, one parse           ← the deliverable
     models.py            GeneratedSQL, Answer
   ingest/
-    generate.py          seeded messy-CSV generator (dev tool)
     pipeline.py          profile + clean + load
+tools/
+  generate_raw.py        seeded messy-CSV generator (dev tool, outside the package)
   adapters/
     openai_llm.py        the only file importing openai
     duckdb_warehouse.py  read-only execution + catalogue read
@@ -49,7 +50,7 @@ handle qualified references and aliases — the half that actually catches thing
 
 ## Ingest
 
-`generate.py` writes 3 CSVs with seeded, *known* defects: four date formats
+`tools/generate_raw.py` writes 3 CSVs with seeded, *known* defects: four date formats
 mixed in one column; `NULL`/`N/A`/`-`/`""` null markers; `LAX` / `Los Angeles,
 CA` / `los angeles` / `  LAX `; duplicate shipment IDs; negative weights;
 delivered-before-shipped rows. Seeded, so `make profile` output and eval
@@ -162,7 +163,7 @@ Reviewed against YAGNI before writing this down. Removed:
   Two Pydantic classes to describe stdout is not free.
 - **`ingest/` as five files** (`rules`, `clean`, `load`, `profile`, `generate`) —
   `rules.py` was `yaml.safe_load(path)`, and clean/load are one SQL statement
-  apart. Two files: `generate.py`, `pipeline.py`.
+  apart. Two files: `tools/generate_raw.py` and `ingest/pipeline.py`.
 - **13 commits → 8.** The extra five were commit ceremony, not logical changes.
 
 Kept despite the itch to cut: `ports.py` (CLAUDE.md mandates it, ~15 lines, and
